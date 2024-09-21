@@ -135,6 +135,7 @@ class AutoFiller:
         if passw and not store:
             store = str(usern)
         istotp = logindata.get("totp")
+        totp = None
 
         if actions:
             for action in actions:
@@ -150,11 +151,13 @@ class AutoFiller:
                         store = ""
                 elif action == "3":
                     if istotp:
-                        store = str(
-                            self.get_login_totp(login_id)
-                            .get("data", {})
-                            .get("data", "")
-                        )
+                        if not totp:
+                            totp = str(
+                                self.get_login_totp(login_id)
+                                .get("data", {})
+                                .get("data", "")
+                            )
+                        store = str(totp)
                     else:
                         store = ""
                 elif action == "4" and store:
@@ -174,10 +177,18 @@ class AutoFiller:
             exit()
         if self.sync:
             sres = self.sender("sync")
+            cac = self.sender(
+                "list", ["items"]
+            )  # run list command to cache results
             if not sres.get("success"):
                 print(f"Problem syncing, skipping: {sres.get("message")}")
             else:
                 print("Syncing successful")
+            if not cac.get("success"):
+                print(
+                    f"There was a issue with getting the bitwaden vault data {cac.get("message")}\nExiting..."
+                )
+                exit(1)
 
         process_info = self.get_active_process()
         if process_info.get("name"):
@@ -190,7 +201,6 @@ class AutoFiller:
                 for item_id, actions in self.accountselect(
                     login_items.get("returns", []), self.actions
                 ):
-                    print(item_id, actions)
                     if item_id:
                         self.autofill(item_id, actions)
                     else:
@@ -198,6 +208,8 @@ class AutoFiller:
             elif login_items.get("message") == "Not found.":
                 print("No login item with that process name, closing...")
             else:
-                print("Failed to retrieve login item.")
+                print(
+                    f"Failed to retrieve login item with message: {login_items.get("message")}\nClosing..."
+                )
         else:
             print("Could not determine the active process.")

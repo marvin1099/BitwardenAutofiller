@@ -25,6 +25,14 @@ class BitwardenDaemon(multiprocessing.Process):
 
     def run(self):
         """Start the daemon process to listen for incoming requests."""
+        cac = self.handle_request(
+            json.dumps({"command": "list", "args": ["items"]})
+        )  # run list command to cache results
+        if not cac.get("success"):
+            print(
+                f"There was a issue with getting the bitwaden vault data {cac.get("message")}\nExiting..."
+            )
+            exit(1)
         self.sock.bind((self.host, self.port))
         self.sock.listen()
         if self.timeout > -1:
@@ -61,8 +69,6 @@ class BitwardenDaemon(multiprocessing.Process):
                     data = conn.recv(1024)
                     if not data:
                         break
-
-                    self.last_activity_time = time.time()
 
                     saltfile = os.path.join(
                         tempfile.gettempdir(),
@@ -130,6 +136,8 @@ class BitwardenDaemon(multiprocessing.Process):
     def handle_request(self, request):
         """Process the incoming request and run the appropriate Bitwarden command."""
         try:
+            command = ""
+            args = []
             request_data = json.loads(request)
             command = request_data.get("command", "")
             args = request_data.get("args", [])
@@ -145,6 +153,7 @@ class BitwardenDaemon(multiprocessing.Process):
                     [command] + args,
                     dictfilter=request_data.get("filter", {}),
                 )
+
                 if result.get("success") != None:
                     result.update({"command": [command] + argcp})
                     return result

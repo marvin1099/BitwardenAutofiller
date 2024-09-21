@@ -15,7 +15,7 @@ if __name__ == "__main__":
     defaults.args_processor()
 
     if defaults.daemonmode or defaults.clientmode:
-        runner = bwr.BitwardenRunner(defaults.bw_path)
+        runner = bwr.BitwardenRunner(defaults)
         daemon = bwd.BitwardenDaemon(runner, defaults)
     else:
         print(

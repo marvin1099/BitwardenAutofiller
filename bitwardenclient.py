@@ -46,6 +46,8 @@ class BitwardenClient:
                     json.dumps(request_data), on_premise_key_local
                 )
                 sock.sendall(encrypted_request)
+                if request_data.get("command", "") == "exit":
+                    return
 
                 # Receive and decrypt the response
                 encrypted_response = self.receive_data(sock)
