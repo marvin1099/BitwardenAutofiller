@@ -18,9 +18,12 @@ Encryption is implemented to ensure that sensitive data, such as passwords and c
   - An **optional user-specified password** that can be set using the `--encryption` flag
   - A **salt**, which is stored in a hardcoded file location.
   
-- **Passphrase Hashing**: The passphrase generated from the above components is hashed using `SHA-256`, and the resulting hash is used as the key for AES-256 encryption.
+- **Passphrase Hashing**: The passphrase generated from the above components is hashed using `SHA-256`,  
+  and the resulting hash is used as the key for AES-256 encryption.
 
-- **Encrypted Command Caching**: Commands sent to the Bitwarden autofill runner are cached in an encrypted format, which helps protect against memory-based attacks. Even if an attacker gains access to the cache, the commands remain encrypted and unusable without the correct passphrase.
+- **Encrypted Command Caching**: Commands sent to the Bitwarden autofill runner are cached in an encrypted format,  
+  which helps protect against memory-based attacks. Even if an attacker gains access to the cache,  
+  the commands remain encrypted and unusable without the correct passphrase.
 
 This ensures that data at rest and in transit is protected, minimizing the risk of sensitive information leakage.
 
@@ -33,9 +36,8 @@ pip install clipboard pyautogui pywinctl psutil cryptography
 ```
 
 Keep in mind when using linux you will probably have to use a virtual enviroment.  
-To make that work run this before running the pip install command:
+To make that work run this before running the pip install command but after the clone command:
 ```bash
-cd "PlanedOrActiveScriptDir"
 python -v .venv
 source ./.venv/bin/activate
 ```
@@ -54,7 +56,8 @@ source ./.venv/bin/activate
    ```
 
 3. **Bitwarden CLI:**
-   Ensure the Bitwarden CLI (`bw`) is installed and accessible in your system's PATH. You can download and install it from the [official Bitwarden CLI page](https://bitwarden.com/help/article/cli/).
+   Ensure the Bitwarden CLI (`bw`) is installed and accessible in your system's PATH.  
+   You can download and install it from the [official Bitwarden CLI page](https://bitwarden.com/help/article/cli/).
 
 ## Usage
 
@@ -87,18 +90,15 @@ The script supports the following command-line options for flexible usage:
 
 ### Example
 
-To start the script in clientmode mode (daemon allready has to be running) with a custom fill action sequence:
+To start the script in client mode (daemon must already be running) with a custom fill action sequence:
 
 ```bash
 python main.py -c -f C14724635
 ```
 
-This will fill in the login information (username, password, and copy the TOTP code) and it will hit tab after username and enter after password
+This will fill in the login information (username, password, and copy the TOTP code),
+and it will hit tab after the username and enter after the password.
 
 ## Contributing
 
 Contributions are welcome! If you'd like to contribute, please fork the repository and submit a pull request.
-
-### Notes
-
-- Ensure all dependencies are properly installed to avoid runtime errors.
