@@ -9,6 +9,21 @@ This Bitwarden autofill script automates the process of filling in login credent
 - Operates in both daemon and client modes.
 - Offers additional security options with encryption for communication.
 
+## Security
+
+Encryption is implemented to ensure that sensitive data, such as passwords and communication between client and daemon, is securely handled:
+
+- **Encryption for Communication**: All communication between the client and the daemon is encrypted using `AES-256`. The encryption passphrase is derived from a combination of:
+  - A **hardcoded password**
+  - An **optional user-specified password** that can be set using the `--encryption` flag
+  - A **salt**, which is stored in a hardcoded file location.
+  
+- **Passphrase Hashing**: The passphrase generated from the above components is hashed using `SHA-256`, and the resulting hash is used as the key for AES-256 encryption.
+
+- **Encrypted Command Caching**: Commands sent to the Bitwarden autofill runner are cached in an encrypted format, which helps protect against memory-based attacks. Even if an attacker gains access to the cache, the commands remain encrypted and unusable without the correct passphrase.
+
+This ensures that data at rest and in transit is protected, minimizing the risk of sensitive information leakage.
+
 ## Dependencies
 
 Install dependencies using `pip`:
@@ -24,7 +39,6 @@ cd "PlanedOrActiveScriptDir"
 python -v .venv
 source ./.venv/bin/activate
 ```
-
 
 ## Installation
 
