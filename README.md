@@ -27,6 +27,14 @@ Encryption is implemented to ensure that sensitive data, such as passwords and c
 
 This ensures that data at rest and in transit is protected, minimizing the risk of sensitive information leakage.
 
+
+## Downloads
+
+You can download the latest binary release from the following link:  
+[Download Binary](https://codeberg.org/marvin1099/BitwardenAutofiller/releases)
+
+If you want to run from source keep on reading.
+
 ## Dependencies
 
 Install dependencies using `pip`:
@@ -64,7 +72,7 @@ source ./.venv/bin/activate
 Run the script with the following command:
 
 ```bash
-python main.py
+python BitwardenAutofiller.py
 ```
 
 ### Command-line Arguments
@@ -88,12 +96,17 @@ The script supports the following command-line options for flexible usage:
 - `-x, --closedaemon`: Send a close signal to the daemon.
 - `-y, --sync`: Sync the Bitwarden vault.
 
+These can also be displayed by running (but with more info):
+```bash
+python BitwardenAutofiller.py -h
+```
+
 ### Example
 
 To start the script in client mode (daemon must already be running) with a custom fill action sequence:
 
 ```bash
-python main.py -c -f C14724635
+python BitwardenAutofiller.py -c -f C14724635
 ```
 
 This will fill in the login information (username, password, and copy the TOTP code),
