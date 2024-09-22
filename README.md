@@ -30,9 +30,7 @@ This ensures that data at rest and in transit is protected, minimizing the risk 
 
 ## Downloads
 
-You can download the latest binary release from the following link:  
-[Download Binary](https://codeberg.org/marvin1099/BitwardenAutofiller/releases)
-
+You can download the [latest binary release from here](https://codeberg.org/marvin1099/BitwardenAutofiller/releases)  
 If you want to run from source keep on reading.
 
 ## Dependencies
