@@ -9,8 +9,7 @@ import autofiller as auto
 import time
 import sys
 
-if __name__ == "__main__":
-
+def main():
     defaults = df.Defaults()
     defaults.args_processor()
 
@@ -42,3 +41,6 @@ if __name__ == "__main__":
         client = bwc.BitwardenClient(defaults)
         autofiller = auto.AutoFiller(client, defaults)
         autofiller.fill_process()
+
+if __name__ == "__main__":
+    main()
