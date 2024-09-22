@@ -4,6 +4,8 @@ import multiprocessing
 import encryption
 import tempfile
 import socket
+import string
+import random
 import time
 import json
 import os
@@ -21,7 +23,48 @@ class BitwardenDaemon(multiprocessing.Process):
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
     def set_session_key(self, key):
-        self.session_key = key
+        on_premise_key_local, _ = self.daemon_cript(True,"Key")
+        self.session_key = encryption.encrypt_aes_256(key, on_premise_key_local)
+
+
+    def daemon_cript(self, create=False, Extra="Comunication"):
+        on_premise_key_local = (
+            f"Bitwarden+Cli~Autofiller:Script-{Extra}*Passphrase"
+        )
+        if Extra == "Comunication":
+            Extra = "Script"
+        saltfile = os.path.join(
+            tempfile.gettempdir(),
+            f"Bitwarden+Cli-Autofiller+{Extra}-Salt+File",
+        )
+        if create:
+            if os.path.isfile(saltfile):
+                os.remove(saltfile)
+
+            salt = "".join(
+                random.choice(string.ascii_uppercase + string.digits)
+                for _ in range(32)
+            )
+            with open(saltfile, "w") as salty:
+                salty.write(salt)
+
+            on_premise_key_local += self.encryption
+            on_premise_key_local += salt
+            return on_premise_key_local, saltfile
+        else:
+            salt = ""
+            if os.path.isfile(saltfile):
+                with open(saltfile, "r") as salty:
+                    salt = salty.read()
+            if len(salt) < 32:
+                print("Error no salt file or short salt, exiting...")
+                exit(1)
+
+            # Encryption passphrase/key used for both encryption and decryption
+            on_premise_key_local += self.encryption
+            on_premise_key_local += salt
+            return on_premise_key_local, saltfile
+
 
     def run(self):
         """Start the daemon process to listen for incoming requests."""
@@ -30,7 +73,7 @@ class BitwardenDaemon(multiprocessing.Process):
         )  # run list command to cache results
         if not cac.get("success"):
             print(
-                f"There was a issue with getting the bitwaden vault data {cac.get("message")}\nExiting..."
+                f"There was a issue with getting the bitwaden vault data: {cac.get("message")}\nExiting..."
             )
             exit(1)
         self.sock.bind((self.host, self.port))
@@ -70,25 +113,7 @@ class BitwardenDaemon(multiprocessing.Process):
                     if not data:
                         break
 
-                    saltfile = os.path.join(
-                        tempfile.gettempdir(),
-                        "Bitwarden+Cli-Autofiller+Script-Salt+File",
-                    )
-                    salt = ""
-                    if os.path.isfile(saltfile):
-                        with open(saltfile, "r") as salty:
-                            salt = salty.read()
-                    if len(salt) < 32:
-                        conn.close()
-                        print(
-                            "Error no salt file or short salt, listening too new connections...\n"
-                        )
-                        break
-
-                    # Encryption passphrase/key used for both encryption and decryption
-                    on_premise_key_local = "Bitwarden+Cli~Autofiller:Script-Comunication*Passphrase"
-                    on_premise_key_local += self.encryption
-                    on_premise_key_local += salt
+                    on_premise_key_local, saltfile = self.daemon_cript()
 
                     try:
                         # Decrypt the received bytes (no need to decode)
@@ -141,14 +166,25 @@ class BitwardenDaemon(multiprocessing.Process):
             request_data = json.loads(request)
             command = request_data.get("command", "")
             args = request_data.get("args", [])
+
             if isinstance(command, str) and command.lower() == "exit":
                 print("Daemon exit command issued, closing daemon...")
+                _, saltfile = self.daemon_cript(Extra="Key")
+                if os.path.isfile(saltfile):
+                    os.remove(saltfile)
+                _, saltfile = self.daemon_cript()
+                if os.path.isfile(saltfile):
+                    os.remove(saltfile)
+
                 exit()
             elif command:
                 # Append the session key to the command
                 argcp = list(args)
                 args.append("--session")
-                args.append(self.session_key)
+
+                on_premise_key_local, _ = self.daemon_cript(Extra="Key")
+                args.append(encryption.decrypt_aes_256(self.session_key, on_premise_key_local))
+
                 result = self.runner.run_bw_command(
                     [command] + args,
                     dictfilter=request_data.get("filter", {}),
