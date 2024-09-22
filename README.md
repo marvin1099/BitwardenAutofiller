@@ -72,7 +72,7 @@ source ./.venv/bin/activate
 Run the script with the following command:
 
 ```bash
-python BitwardenAutofiller.py
+python bitwardenautofiller.py
 ```
 
 ### Command-line Arguments
@@ -98,7 +98,7 @@ The script supports the following command-line options for flexible usage:
 
 These can also be displayed by running (but with more info):
 ```bash
-python BitwardenAutofiller.py -h
+python bitwardenautofiller.py -h
 ```
 
 ### Example
@@ -106,7 +106,7 @@ python BitwardenAutofiller.py -h
 To start the script in client mode (daemon must already be running) with a custom fill action sequence:
 
 ```bash
-python BitwardenAutofiller.py -c -f C14724635
+python bitwardenautofiller.py -c -f C14724635
 ```
 
 This will fill in the login information (username, password, and copy the TOTP code),
