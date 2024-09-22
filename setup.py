@@ -3,13 +3,12 @@ from setuptools import setup, find_packages
 setup(
     name='BitwardenAutofiller',
     version='0.1.0',
-    author='Your Name',
-    author_email='your.email@example.com',
+    author='marvin1099',
     description='A Bitwarden autofill script for non-browser applications',
     long_description=open('README.md').read(),
     long_description_content_type='text/markdown',
-    url='https://github.com/yourusername/bitwarden-autofiller',
-    packages=find_packages(),  # Automatically finds all packages in the directory
+    url='https://codeberg.org/marvin1099/BitwardenAutofiller',
+    packages=find_packages(),
     install_requires=[
         'clipboard',
         'pyautogui',
@@ -19,7 +18,7 @@ setup(
     ],
     entry_points={
         'console_scripts': [
-            'bitwardenautofiller = main:main'
+            'bitwardenautofiller = bitwardenautofiller:main'
         ],
     },
     classifiers=[
