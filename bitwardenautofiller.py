@@ -9,9 +9,10 @@ import autofiller as auto
 import time
 import sys
 
-def main():
+def main(args=None):
+
     defaults = df.Defaults()
-    defaults.args_processor()
+    defaults.args_processor(args)
 
     if defaults.daemonmode or defaults.clientmode:
         runner = bwr.BitwardenRunner(defaults)
