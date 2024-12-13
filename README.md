@@ -97,8 +97,11 @@ Otherwise if you use binarys run / dobble click the file:
 - `BitwardenAutofillerLinux` on Linux
 
 #### **IMPORTANT**  
-To make autofill work, you must add the program name as a URL entry in your Bitwarden account.  
-For example, if your application is called `steam`, you should add `pcprocess://steam` as a URL in the Bitwarden GUI app.  
+To make autofill work, you must add the program name as a URL entry in the app entry.  
+So if you have a browser autofill account for your app you just add the URL there.  
+Otherwise you add the URL to a new entry and input your username and password as usual.  
+For example, if your application is called `steam`,  
+you should add `pcprocess://steam` as a URL in the Bitwarden GUI app under your steam account entry.  
 Always use the format `pcprocess://<app_name>` for applications you want to autofill.
 
 ### Command-line Arguments
