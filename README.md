@@ -86,6 +86,12 @@ Run the script with the following command:
 python bitwardenautofiller.py
 ```
 
+**IMPORTANT**  
+To make autofill work, you will have to add the name of the program as a URL.  
+So for example if your program is called "steam",  
+you would add "pcprocess://steam" as a URL in the Bitwarden GUI app.  
+So always add "pcprocess://" in front of the app name in your account to be autofilled.
+
 ### Command-line Arguments
 
 The script supports the following command-line options for flexible usage:
