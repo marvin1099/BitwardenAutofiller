@@ -1,5 +1,0 @@
-clipboard
-pyautogui
-pywinctl
-psutil
-cryptography
