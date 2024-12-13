@@ -31,7 +31,10 @@ This ensures that data at rest and in transit is protected, minimizing the risk 
 ## Downloads
 
 You can download the [latest binary releases from here](https://codeberg.org/marvin1099/BitwardenAutofiller/releases)  
-If you want to run from source or compile for yourself keep on reading.
+After that scroll down to "usage" in the readme.  
+And read the lines under **important**.  
+And you can check the app arguments there as well. 
+If you want to run from source or compile for yourself keep on reading from here.
 
 ## Installation
 
