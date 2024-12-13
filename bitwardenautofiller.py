@@ -3,7 +3,7 @@
 import defaults as df
 import bitwardenrunner as bwr
 import bitwardenlogin as bwl
-import bitwardendamon as bwd
+import bitwardendaemon as bwd
 import bitwardenclient as bwc
 import autofiller as auto
 import time
@@ -31,6 +31,10 @@ def main(args=None):
 
         # Set the sesson key of the daemon
         daemon.set_session_key(key)
+
+        key = "-" * len(key) # Make shure the key is cleared in memorry after it is set
+        key = None # Also set the variable to none to indicate it was cleared
+
         print("\nStarting daemon, do not close this window")
         print(
             "If your console imput is blocked becalse of the daemon use a new terminal window"
