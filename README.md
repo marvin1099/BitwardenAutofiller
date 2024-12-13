@@ -33,7 +33,7 @@ You can download the [latest binary releases from here](https://codeberg.org/mar
 After downloading the binary, **continue reading at the [Usage](#usage) section** to understand how to run the script.
 
 If you want to build the project from source or run it directly in a development environment,  
-**continue reading this section** for the setup instructions.
+**continue reading** for the setup instructions.
 
 ## Installation (For Running From Source)
 
@@ -59,6 +59,9 @@ If you want to build the project from source or run it directly in a development
    Ensure the Bitwarden CLI (`bw`) is installed and accessible in your system's PATH.  
    You can download and install it from the [official Bitwarden CLI page](https://bitwarden.com/help/article/cli/).
 
+5. **Continue reading at the [Usage](#usage) section** to understand how to run the script.
+   **Otherwise continue reading** for building from source.  
+
 ### Building From Source
 
 1. **Clone the repository (if not already done):**
@@ -66,7 +69,7 @@ If you want to build the project from source or run it directly in a development
    git clone https://codeberg.org/marvin1099/BitwardenAutofiller.git
    cd BitwardenAutofiller
    ```
-   Run this in PowerShell on Windows or a bash console on Linux.
+   Run this `in PowerShell on Windows` or `a bash console on Linux`.
 
 2. **Build the binary:**
    - On **Windows**, run:
@@ -80,8 +83,6 @@ If you want to build the project from source or run it directly in a development
    (Note: The `.venv` creation is automatic during the Linux build.)
 
 3. The binary files will be located in the `dist` folder.  
-   If you're using the binary, **refer to the [Usage](#usage) section** for running the autofiller.  
-   If you prefer running from source, **continue reading below**.
 
 ## Usage
 
@@ -149,6 +150,13 @@ To start the script in client mode with a sync command and a custom combination 
 python bitwardenautofiller.py -c -e ComplexPassword
 ```
 
+To use a custom Installation path of bitwarden you would use
+```bash
+python bitwardenautofiller.py -bw /path/to/bw
+```
+In here there is no info on daemon or clientmode.  
+In this case daemon will be used if it isn't running, otherwise the client wil run.
+
 To start the script in client mode (daemon must already be running) with a custom fill action sequence:
 ```bash
 python bitwardenautofiller.py -c -f C14724635
@@ -166,4 +174,4 @@ If you use a binary you just replace `python bitwardenautofiller.py` with the pa
 ## Contributing
 
 Contributions are welcome! If you'd like to contribute, please fork the repository and submit a pull request.  
-Please do so on the main repo on codeberg.org if possible.
+Please do so on the [main repo on codeberg.org](https://codeberg.org/marvin1099/BitwardenAutofiller) if possible.
