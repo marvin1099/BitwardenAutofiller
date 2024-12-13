@@ -1,6 +1,6 @@
 # Bitwarden Autofill Script
 
-This Bitwarden autofill script automates the process of filling in login credentials on desktop applications. It leverages Bitwarden's CLI to retrieve and input usernames, passwords, and 2FA codes into non-browser apps, solving the browser-only limitation of Bitwarden's native autofill feature.
+This Bitwarden autofill script automates the process of filling in login credentials on desktop applications. It leverages Bitwarden's CLI to retrieve and input usernames, passwords, and TOTP codes into non-browser apps, solving the browser-only limitation of Bitwarden's native autofill feature.
 
 ## Features
 
@@ -27,16 +27,15 @@ Encryption is implemented to ensure that sensitive data, such as passwords and c
 
 This ensures that data at rest and in transit is protected, minimizing the risk of sensitive information leakage.
 
-
 ## Downloads
 
-You can download the [latest binary releases from here](https://codeberg.org/marvin1099/BitwardenAutofiller/releases)  
-After that scroll down to "usage" in the readme.  
-And read the lines under **important**.  
-And you can check the app arguments there as well. 
-If you want to run from source or compile for yourself keep on reading from here.
+You can download the [latest binary releases from here](https://codeberg.org/marvin1099/BitwardenAutofiller/releases).  
+After downloading the binary, **continue reading at the [Usage](#usage) section** to understand how to run the script.
 
-## Installation
+If you want to build the project from source or run it directly in a development environment,  
+**continue reading this section** for the setup instructions.
+
+## Installation (For Running From Source)
 
 1. **Clone the repository:**
    ```bash
@@ -44,12 +43,10 @@ If you want to run from source or compile for yourself keep on reading from here
    cd BitwardenAutofiller
    ```
 
-2. **Create a virtual enviroment (needed on linux):**
-   The following will need to be changed for windows if you want a venv on windows.
-   Run the following in a bash console:
+2. **Create a virtual environment (Linux users):**
+   The following steps will need to be adjusted if you're on Windows. Run the following in a bash console:
    ```bash
    python -m venv .venv
-   cd .venv
    source .venv/bin/activate
    ```
 
@@ -62,38 +59,46 @@ If you want to run from source or compile for yourself keep on reading from here
    Ensure the Bitwarden CLI (`bw`) is installed and accessible in your system's PATH.  
    You can download and install it from the [official Bitwarden CLI page](https://bitwarden.com/help/article/cli/).
 
-### Building
-1. **To Build first clone the repository if you have not done it yet:**
+### Building From Source
+
+1. **Clone the repository (if not already done):**
    ```bash
    git clone https://codeberg.org/marvin1099/BitwardenAutofiller.git
    cd BitwardenAutofiller
    ```
-   Run this in powershell on windows and on bash for linux.
-2. Next on Windows run:
-   ```powershell
-   powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1
-   ```
-   And on Linux run (the .venv creation is automatic here):
-   ```bash
-   ./build.sh
-   ```
-3. The binary files wil be in the dist folder.  
-   The universal .pyz only gets build with Linux.  
-   You can run the apropriate file for you now (in the terminal).   
+   Run this in PowerShell on Windows or a bash console on Linux.
+
+2. **Build the binary:**
+   - On **Windows**, run:
+     ```powershell
+     powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1
+     ```
+   - On **Linux**, run:
+     ```bash
+     ./build.sh
+     ```
+   (Note: The `.venv` creation is automatic during the Linux build.)
+
+3. The binary files will be located in the `dist` folder.  
+   If you're using the binary, **refer to the [Usage](#usage) section** for running the autofiller.  
+   If you prefer running from source, **continue reading below**.
 
 ## Usage
 
-Run the script with the following command:
+If running the script from source use following command:
 
 ```bash
 python bitwardenautofiller.py
 ```
 
-**IMPORTANT**  
-To make autofill work, you will have to add the name of the program as a URL.  
-So for example if your program is called "steam",  
-you would add "pcprocess://steam" as a URL in the Bitwarden GUI app.  
-So always add "pcprocess://" in front of the app name in your account to be autofilled.
+Otherwise if you use binarys run / dobble click the file: 
+- `BitwardenAutofillerWindows.exe` on Windows
+- `BitwardenAutofillerLinux` on Linux
+
+#### **IMPORTANT**  
+To make autofill work, you must add the program name as a URL entry in your Bitwarden account.  
+For example, if your application is called `steam`, you should add `pcprocess://steam` as a URL in the Bitwarden GUI app.  
+Always use the format `pcprocess://<app_name>` for applications you want to autofill.
 
 ### Command-line Arguments
 
@@ -113,27 +118,50 @@ The script supports the following command-line options for flexible usage:
 - `-ip, --localip`: Local IP address for the daemon server (default is '127.0.0.1').
 - `-lp, --localport`: Local port for the daemon server (default is '64756').
 - `-f, --fillactions`: Set custom fill actions for autofill.  
-    (default: 'C14724635' is a sequence of actions: 1 user, 2 pass, 3  
-    totp, 4 type, 5 copy, 6 newline, 7 tab, A next found account, B previus found  
-    account, C first found account, D last found account)  
+    (Default: `C14724635`, a sequence of actions: 1 = user, 2 = pass, 3 = totp, 4 = type, 5 = copy,  
+    6 = newline, 7 = tab, A = next account, B = previous account, C = first account, D = last account.)
 - `-x, --closedaemon`: Send a close signal to the daemon.
 - `-y, --sync`: Sync the Bitwarden vault.
 
-These can also be displayed by running (but with more info):
+For more details, run:
 ```bash
 python bitwardenautofiller.py -h
 ```
 
-### Example
+To run the binary versions with arguments open a terminal and run:  
+- `"BitwardenAutofillerWindows.exe" -h` on Windows  
+- `"BitwardenAutofillerLinux" -h` on Linux  
+
+The full filepaths will be needed, if you are not at the script directory.  
+eg. `"/home/user/Apps/Autofiller/BitwardenAutofillerLinux" -h` this is just an example of course.  
+You need to enter your path of the autofiller.
+
+### Examples
+
+To start the script in daemon mode with a certfile and with a custom additional communication password
+```bash
+python bitwardenautofiller.py -d -cf /path/to/cert/file.cer -e ComplexPassword
+```
+The same communication password would also need to be set for the client
+
+To start the script in client mode with a sync command and a custom combination password
+```bash
+python bitwardenautofiller.py -c -e ComplexPassword
+```
 
 To start the script in client mode (daemon must already be running) with a custom fill action sequence:
-
 ```bash
 python bitwardenautofiller.py -c -f C14724635
 ```
-
 This will fill in the login information (username, password, and copy the TOTP code),  
 and it will hit tab after the username and enter after the password.
+
+The daemon can be closed with the client by sending:
+```bash
+python bitwardenautofiller.py -c -x
+```
+
+If you use a binary you just replace `python bitwardenautofiller.py` with the path to your binary.
 
 ## Contributing
 
