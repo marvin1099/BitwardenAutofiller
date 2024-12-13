@@ -31,22 +31,7 @@ This ensures that data at rest and in transit is protected, minimizing the risk 
 ## Downloads
 
 You can download the [latest binary releases from here](https://codeberg.org/marvin1099/BitwardenAutofiller/releases)  
-If you want to run from source keep on reading.
-
-## Dependencies
-
-Install dependencies using `pip`:
-
-```bash
-pip install clipboard pyautogui pywinctl psutil cryptography
-```
-
-Keep in mind when using linux you will probably have to use a virtual enviroment.  
-To make that work run this before running the pip install command but after the clone command:
-```bash
-python -v .venv
-source ./.venv/bin/activate
-```
+If you want to run from source or compile for yourself keep on reading.
 
 ## Installation
 
@@ -56,14 +41,42 @@ source ./.venv/bin/activate
    cd BitwardenAutofiller
    ```
 
-2. **Install required dependencies:**
+2. **Create a virtual enviroment (needed on linux):**
+   The following will need to be changed for windows if you want a venv on windows.
+   Run the following in a bash console:
    ```bash
-   pip install -r requirements.txt
+   python -m venv .venv
+   cd .venv
+   source .venv/bin/activate
    ```
 
-3. **Bitwarden CLI:**
+3. **Install required dependencies:**
+   ```bash
+   pip install -e .
+   ```
+
+4. **Bitwarden CLI:**
    Ensure the Bitwarden CLI (`bw`) is installed and accessible in your system's PATH.  
    You can download and install it from the [official Bitwarden CLI page](https://bitwarden.com/help/article/cli/).
+
+### Building
+1. **To Build first clone the repository if you have not done it yet:**
+   ```bash
+   git clone https://codeberg.org/marvin1099/BitwardenAutofiller.git
+   cd BitwardenAutofiller
+   ```
+   Run this in powershell on windows and on bash for linux.
+2. Next on Windows run:
+   ```powershell
+   powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1
+   ```
+   And on Linux run (the .venv creation is automatic here):
+   ```bash
+   ./build.sh
+   ```
+3. The binary files wil be in the dist folder.  
+   The universal .pyz only gets build with Linux.  
+   You can run the apropriate file for you now (in the terminal).   
 
 ## Usage
 
@@ -90,7 +103,10 @@ The script supports the following command-line options for flexible usage:
 - `-t, --daemontimeout`: Set the daemon connection timeout.
 - `-ip, --localip`: Local IP address for the daemon server (default is '127.0.0.1').
 - `-lp, --localport`: Local port for the daemon server (default is '64756').
-- `-f, --fillactions`: Set custom fill actions for autofill.
+- `-f, --fillactions`: Set custom fill actions for autofill.  
+    (default: 'C14724635' is a sequence of actions: 1 user, 2 pass, 3  
+    totp, 4 type, 5 copy, 6 newline, 7 tab, A next found account, B previus found  
+    account, C first found account, D last found account)  
 - `-x, --closedaemon`: Send a close signal to the daemon.
 - `-y, --sync`: Sync the Bitwarden vault.
 
@@ -107,9 +123,10 @@ To start the script in client mode (daemon must already be running) with a custo
 python bitwardenautofiller.py -c -f C14724635
 ```
 
-This will fill in the login information (username, password, and copy the TOTP code),
+This will fill in the login information (username, password, and copy the TOTP code),  
 and it will hit tab after the username and enter after the password.
 
 ## Contributing
 
-Contributions are welcome! If you'd like to contribute, please fork the repository and submit a pull request.
+Contributions are welcome! If you'd like to contribute, please fork the repository and submit a pull request.  
+Please do so on the main repo on codeberg.org if possible.
