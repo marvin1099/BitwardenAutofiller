@@ -96,7 +96,7 @@ Otherwise if you use binarys run / dobble click the file:
 - `BitwardenAutofillerWindows.exe` on Windows
 - `BitwardenAutofillerLinux` on Linux
 
-#### **IMPORTANT**  
+#### IMPORTANT
 To make autofill work, you must add the program name as a URL entry in the app entry.  
 So if you have a browser autofill account for your app you just add the URL there.  
 Otherwise you add the URL to a new entry and input your username and password as usual.  
@@ -110,6 +110,7 @@ The script supports the following command-line options for flexible usage:
 
 - `-s, --serverurl`: URL that Bitwarden uses.
 - `-cf, --certfile`: Path to the certificate file (if Bitwarden is self-signed).
+- `-l, --logout`: Logout from Bitwarden (fixes sync issues, relogin needed).
 - `-p, --password`: Bitwarden vault password.
 - `-m, --mail`: Bitwarden vault email.
 - `-e, --encryption`: Additional password for encryption.
@@ -119,11 +120,13 @@ The script supports the following command-line options for flexible usage:
 - `-bw, --bitwardenclipath`: Path to Bitwarden CLI (default is 'bw').
 - `-n, --noblocking`: Non-blocking/non-interactive mode.
 - `-t, --daemontimeout`: Set the daemon connection timeout.
+- `-sf, --saltfolder`: Create the saltfiles in a subfolder in /tmp  
+    (usefull for file sync, when daemon and client are on 2 PCs).
 - `-ip, --localip`: Local IP address for the daemon server (default is '127.0.0.1').
 - `-lp, --localport`: Local port for the daemon server (default is '64756').
-- `-f, --fillactions`: Set custom fill actions for autofill.  
+- `-f, --fillactions`: Set custom fill actions for autofill  
     (Default: `C14724635`, a sequence of actions: 1 = user, 2 = pass, 3 = totp, 4 = type, 5 = copy,  
-    6 = newline, 7 = tab, A = next account, B = previous account, C = first account, D = last account.)
+    6 = newline, 7 = tab, A = next account, B = previous account, C = first account, D = last account).
 - `-x, --closedaemon`: Send a close signal to the daemon.
 - `-y, --sync`: Sync the Bitwarden vault.
 
@@ -133,8 +136,8 @@ python bitwardenautofiller.py -h
 ```
 
 To run the binary versions with arguments open a terminal and run:  
-- `"BitwardenAutofillerWindows.exe" -h` on Windows  
-- `"BitwardenAutofillerLinux" -h` on Linux  
+- `"BitwardenAutofillerWindows.exe" -h` on Windows.  
+- `"BitwardenAutofillerLinux" -h` on Linux.  
 
 The full filepaths will be needed, if you are not at the script directory.  
 eg. `"/home/user/Apps/Autofiller/BitwardenAutofillerLinux" -h` this is just an example of course.  
@@ -142,28 +145,30 @@ You need to enter your path of the autofiller.
 
 ### Examples
 
-To start the script in daemon mode with a certfile and with a custom additional communication password
+To start the script in daemon mode with a certfile and with a custom additional communication password:
 ```bash
 python bitwardenautofiller.py -d -cf /path/to/cert/file.cer -e ComplexPassword
 ```
-The same communication password would also need to be set for the client
+The same communication password would also need to be set for the client.
 
-To start the script in client mode with a sync command and a custom combination password
+To start the script in client mode with the sync command and a additional custom communication password (daemon needs to run):
 ```bash
 python bitwardenautofiller.py -c -e ComplexPassword
 ```
 
-To use a custom Installation path of bitwarden you would use
+To use a custom Installation path of Bitwarden you would use:
 ```bash
 python bitwardenautofiller.py -bw /path/to/bw
 ```
 In here there is no info on daemon or clientmode.  
-In this case daemon will be used if it isn't running, otherwise the client wil run.
+In this case daemon will be used if it isn't running, otherwise the client will run.
 
 To start the script in client mode (daemon must already be running) with a custom fill action sequence:
 ```bash
 python bitwardenautofiller.py -c -f C14724635
 ```
+On Linux add `sleep 1; ` in front to wait 1 second before checking for the active app.  
+On PowerShell Windows add `Start-Sleep -Seconds 1; ` in front for the same behavior.  
 This will fill in the login information (username, password, and copy the TOTP code),  
 and it will hit tab after the username and enter after the password.
 
@@ -173,6 +178,49 @@ python bitwardenautofiller.py -c -x
 ```
 
 If you use a binary you just replace `python bitwardenautofiller.py` with the path to your binary.
+
+### Network usage
+If you want, you can use the daemon on a other pc of your network.  
+For that you want to fist setup a SMB share or something like it.  
+You want to do this on the pc that runs the the daemon.  
+This pc will never have to type anything, as the client will do that.  
+So you can have this on a server without a GUI.  
+You want to share the "/tmp/Bitwarden+Cli-Autofiller+Script-Directory" folder.
+
+Next go to the client pc (the one where you like to autofill).  
+There mount the share to "/tmp/Bitwarden+Cli-Autofiller+Script-Directory".  
+By doing this (or a variation of this) the salt files are now the same on both PCs.
+
+Next on the server run:
+```bash
+python bitwardenautofiller.py -n -d -sf -t -1 -cf CERTFILE -s SERVERURL  -p PASSWORD -m MAIL 
+```
+Not all of this is needed but lets break it down:
+- `-n`: disables all inputs, for a server this is useful. 
+- `-d`: runs daemonmode.
+- `-sf`: enables the saltfile subfolder "/Bitwarden+Cli-Autofiller+Script-Directory".
+- `-t` `-1`: disables timeout, also useful on a server.
+- `-cf` `CERTFILE`: set the certfile (only needed for self-signed Bitwarden).
+- `-s` `SERVERURL`: set the server URL (if you use your own server, only needs to be set once).
+- `-p` `PASSWORD`: set the vault password.
+- `-m` `MAIL`: set the vault mail.
+
+Replace uppercase words with the correct info for you.
+
+On the client run:
+```bash
+python bitwardenautofiller.py -c -sf -ip LOCALIP -lp LOCALPORT
+```
+This will then autofill the active app.  
+Add `sleep 1; ` in front to wait 1 second before cheking for the active app.  
+On PowerShell Windows add `Start-Sleep -Seconds 1; ` in front for the same behavior.  
+Let's also break down the command:
+- `-c`: runs clientmode.
+- `-sf`: enables the saltfile subfolder "/Bitwarden+Cli-Autofiller+Script-Directory".
+- `-ip` `LOCALIP`: set the daemon IP.
+- `-lp` `LOCALPORT`: set the daemon port.
+
+Replace uppercase words with the correct info for you.
 
 ## Contributing
 

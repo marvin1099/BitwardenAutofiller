@@ -11,6 +11,7 @@ class BitwardenLogin:
     def __init__(self, runner, defaults):
         self.runner = runner
         self.interactive = not defaults.noblock
+        self.logout = defaults.logout
         self.mail = defaults.mail
         self.passw = defaults.passw
         self.certfile = defaults.certfile
@@ -69,7 +70,8 @@ class BitwardenLogin:
         else:
             session_key = self.cert_detector(response)
             if session_key:
-                self.passw = "-" * len(self.passw)
+                if self.passw:
+                    self.passw = "-" * len(self.passw)
                 self.passw = None
                 return session_key
             else:
@@ -191,9 +193,18 @@ class BitwardenLogin:
         active_state = status.get("data").get("template").get("status")
 
         if active_state == "locked" or active_state == "unlocked":
-            # If logged in, unlock to get the session key
-            session_token = self.unlock_vault()
+            # If logged in
+            if self.logout:
+                # Logout and perform login
+                print("Logging out")
+                logout_response = self.runner.run_bw_command(["logout", "--response"])
+                session_token = self.get_session_token()
+            else:
+                # Unlock to get the session key
+                session_token = self.unlock_vault()
         else:
+            if self.logout:
+                print("Not logged in, no need to logout")
             # If not logged in, perform login
             session_token = self.get_session_token()
 

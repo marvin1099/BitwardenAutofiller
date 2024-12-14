@@ -3,6 +3,7 @@ import subprocess
 # import time
 import encryption
 import tempfile
+import pathlib
 import random
 import string
 import json
@@ -13,19 +14,29 @@ class BitwardenRunner:
     def __init__(self, defaults):
         self.bw_path = defaults.bw_path
         self.encryption = defaults.encryption
+        self.saltfolder = defaults.saltfolder
         self.cache = None
 
-    def cache_cript(self, create=True):
+    def cache_cript(self, create=True, delete=False):
         on_premise_key_local = (
             "Bitwarden+Cli~Autofiller:Script-Store*Passphrase"
         )
-        saltfile = os.path.join(
-            tempfile.gettempdir(),
-            "Bitwarden+Cli-Autofiller+Store-Salt+File",
-        )
+        saltfile = pathlib.Path(tempfile.gettempdir())
+
+        if self.saltfolder:
+            saltfile /= "Bitwarden+Cli-Autofiller+Script-Directory"
+            os.makedirs(saltfile, exist_ok=True)
+
+        saltfile /= "Bitwarden+Cli-Autofiller+Store-Salt+File"
+
+        if delete:
+            if saltfile.is_file():
+                saltfile.unlink()
+            return
+
         if create:
-            if os.path.isfile(saltfile):
-                os.remove(saltfile)
+            if saltfile.is_file():
+                saltfile.unlink()
 
             salt = "".join(
                 random.choice(string.ascii_uppercase + string.digits)
@@ -39,7 +50,7 @@ class BitwardenRunner:
             return on_premise_key_local
         else:
             salt = ""
-            if os.path.isfile(saltfile):
+            if saltfile.is_file():
                 with open(saltfile, "r") as salty:
                     salt = salty.read()
             if len(salt) < 32:

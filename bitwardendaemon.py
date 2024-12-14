@@ -3,6 +3,7 @@
 import multiprocessing
 import encryption
 import tempfile
+import pathlib
 import socket
 import string
 import random
@@ -20,6 +21,7 @@ class BitwardenDaemon(multiprocessing.Process):
         self.host = defaults.host
         self.port = defaults.port
         self.encryption = defaults.encryption
+        self.saltfolder = defaults.saltfolder
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
     def set_session_key(self, key):
@@ -33,13 +35,18 @@ class BitwardenDaemon(multiprocessing.Process):
         )
         if Extra == "Comunication":
             Extra = "Script"
-        saltfile = os.path.join(
-            tempfile.gettempdir(),
-            f"Bitwarden+Cli-Autofiller+{Extra}-Salt+File",
-        )
+
+        saltfile = pathlib.Path(tempfile.gettempdir())
+
+        if self.saltfolder:
+            saltfile /= "Bitwarden+Cli-Autofiller+Script-Directory"
+            os.makedirs(saltfile, exist_ok=True)
+
+        saltfile /= f"Bitwarden+Cli-Autofiller+{Extra}-Salt+File"
+
         if create:
-            if os.path.isfile(saltfile):
-                os.remove(saltfile)
+            if saltfile.is_file():
+                saltfile.unlink()
 
             salt = "".join(
                 random.choice(string.ascii_uppercase + string.digits)
@@ -53,7 +60,7 @@ class BitwardenDaemon(multiprocessing.Process):
             return on_premise_key_local, saltfile
         else:
             salt = ""
-            if os.path.isfile(saltfile):
+            if saltfile.is_file():
                 with open(saltfile, "r") as salty:
                     salt = salty.read()
             if len(salt) < 32:
@@ -149,8 +156,8 @@ class BitwardenDaemon(multiprocessing.Process):
                     conn.close()
 
                     # Remove salt file
-                    if os.path.isfile(saltfile):
-                        os.remove(saltfile)
+                    if saltfile.is_file():
+                        saltfile.unlink()
 
                     # exit()
                     print(
@@ -170,11 +177,12 @@ class BitwardenDaemon(multiprocessing.Process):
             if isinstance(command, str) and command.lower() == "exit":
                 print("Daemon exit command issued, closing daemon...")
                 _, saltfile = self.daemon_cript(Extra="Key")
-                if os.path.isfile(saltfile):
-                    os.remove(saltfile)
+                if saltfile.is_file():
+                    saltfile.unlink()
                 _, saltfile = self.daemon_cript()
-                if os.path.isfile(saltfile):
-                    os.remove(saltfile)
+                if saltfile.is_file():
+                    saltfile.unlink()
+                self.runner.cache_cript(delete=True)
 
                 exit()
             elif command:

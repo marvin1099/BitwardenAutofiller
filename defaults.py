@@ -30,6 +30,12 @@ class Defaults:
             type=str,
             help="Certificate file used if Bitwarden is self-signed (will exit / ask if not set and needed, can be set via env, for daemon)",
         )
+        parser.add_argument(
+            "-l",
+            "--logout",
+            action="store_true",
+            help="Logout from Bitwarden (fixes sync issues, relogin needed, for daemon)",
+        )
 
         # Authentication related arguments
         parser.add_argument(
@@ -90,20 +96,26 @@ class Defaults:
             type=int,
             help=f"Set daemon connection timeout in seconds (default '{self.timeout}', for daemon)",
         )
+        parser.add_argument(
+            "-sf",
+            "--saltfolder",
+            action="store_true",
+            help="Create the saltfiles in a subfolder in /tmp (usefull for file sync, when daemon and client are on 2 PCs)",
+        )
 
         # Local IP and port configuration for daemon
         parser.add_argument(
             "-ip",
             "--localip",
             type=str,
-            help=f"Local IP address for the daemon server (default '{self.host}'",
+            help=f"Local IP address for the daemon server (default '{self.host}')",
             default=self.host,
         )
         parser.add_argument(
             "-lp",
             "--localport",
             type=int,
-            help=f"Local port for the daemon server (default '{self.port}'",
+            help=f"Local port for the daemon server (default '{self.port}')",
             default=self.port,
         )
 
@@ -152,6 +164,13 @@ class Defaults:
         else:
             self.certfile = None
 
+        if parsed_args.logout:
+            self.logout = True
+            print(f"Storing logout request for Bitwarden")
+            something_printed = True
+        else:
+            self.logout = False
+
         if parsed_args.password:
             print(f"Using provided password")
             something_printed = True
@@ -172,6 +191,13 @@ class Defaults:
             self.encryption = parsed_args.encryption
         else:
             self.encryption = ""
+
+        if parsed_args.saltfolder:
+            print(f"Using the saltfolder for filesync")
+            something_printed = True
+            self.saltfolder = True
+        else:
+            self.saltfolder = False
 
         if parsed_args.daemonmode != parsed_args.clientmode:
             if parsed_args.daemonmode:

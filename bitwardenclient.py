@@ -2,6 +2,7 @@
 
 import encryption
 import tempfile
+import pathlib
 import random
 import socket
 import string
@@ -10,10 +11,11 @@ import os
 
 
 class BitwardenClient:
-    def __init__(self, defauts):
-        self.host = defauts.host
-        self.port = defauts.port
-        self.encryption = defauts.encryption
+    def __init__(self, defaults):
+        self.host = defaults.host
+        self.port = defaults.port
+        self.saltfolder = defaults.saltfolder
+        self.encryption = defaults.encryption
 
     def send_request(self, request_data):
         """Send an encrypted request to the Bitwarden daemon and receive the response."""
@@ -21,12 +23,16 @@ class BitwardenClient:
             try:
                 sock.connect((self.host, self.port))
 
-                saltfile = os.path.join(
-                    tempfile.gettempdir(),
-                    "Bitwarden+Cli-Autofiller+Script-Salt+File",
-                )
-                if os.path.isfile(saltfile):
-                    os.remove(saltfile)
+                saltfile = pathlib.Path(tempfile.gettempdir())
+
+                if self.saltfolder:
+                    saltfile /= "Bitwarden+Cli-Autofiller+Script-Directory"
+                    os.makedirs(saltfile, exist_ok=True)
+
+                saltfile /= "Bitwarden+Cli-Autofiller+Script-Salt+File"
+
+                if saltfile.is_file():
+                    saltfile.unlink()
 
                 salt = "".join(
                     random.choice(string.ascii_uppercase + string.digits)
