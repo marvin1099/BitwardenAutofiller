@@ -58,7 +58,10 @@ If you want to build the project from source or run it directly in a development
 
 3. **Install required dependencies:**
    ```bash
-   pip install -e .
+   # for cli
+   pip install .
+   # for gui (can be skipped if you dont need the gui)
+   pip install .[gui]
    ```
 
 4. **Bitwarden CLI:**
