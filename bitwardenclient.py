@@ -14,6 +14,7 @@ class BitwardenClient:
     def __init__(self, defaults):
         self.host = defaults.host
         self.port = defaults.port
+        self.do_raise = defaults.do_raise
         self.saltfolder = defaults.saltfolder
         self.encryption = defaults.encryption
 
@@ -63,10 +64,16 @@ class BitwardenClient:
                         print(
                             f"Server failed to decrypt incoming data (encryption password might not match)\nClosing..."
                         )
-                        exit(1)
+                        if self.do_raise:
+                            raise ValueError("Server failed to decrypt incoming data (encryption password might not match)")
+                        else:
+                            exit(1)
                     elif err == "Encryption failed":
                         print("Server failed to encrypt data\nClosing...")
-                        exit(1)
+                        if self.do_raise:
+                            raise RuntimeError("Server failed to encrypt data")
+                        else:
+                            exit(1)
                 except Exception as e:
                     pass
 
@@ -78,7 +85,10 @@ class BitwardenClient:
                     print(
                         f"Failed to decrypt incoming data (encryption password might not match): {e}\nClosing..."
                     )
-                    exit(1)
+                    if self.do_raise:
+                        raise ValueError(f"Failed to decrypt incoming data (encryption password might not match): {e}")
+                    else:
+                        exit(1)
 
                 return json.loads(decrypted_response)
             except Exception as e:

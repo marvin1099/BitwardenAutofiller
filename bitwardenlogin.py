@@ -16,6 +16,7 @@ class BitwardenLogin:
         self.passw = defaults.passw
         self.certfile = defaults.certfile
         self.serverurl = defaults.serverurl
+        self.do_raise = defaults.do_raise
 
     def get_session_token(self):
         """Login to Bitwarden and retrieve a session token."""
@@ -25,24 +26,36 @@ class BitwardenLogin:
                 self.mail = input("Mail: ")
             else:
                 print(
-                    "Noblocking was activated, but no mail was given, Exiting"
+                    "Nonblocking was activated, but no mail was given, Exiting"
                 )
-                sys.exit(1)
+                if self.do_raise:
+                    raise ValueError("Nonblocking was activated, but no mail was given")
+                else:
+                    exit(1)
             if not self.mail:
                 print("Mail not given, Exiting")
-                sys.exit(1)
+                if self.do_raise:
+                    raise ValueError("No mail was given")
+                else:
+                    exit(1)
 
         if not self.passw:
             if self.interactive:
                 self.passw = getpass(prompt="Password: [hidden]")
             else:
                 print(
-                    "Noblocking was activated, but no password was given, Exiting"
+                    "Nonblocking was activated, but no password was given, Exiting"
                 )
-                sys.exit(1)
+                if self.do_raise:
+                    raise ValueError("Nonblocking was activated, but no password was given")
+                else:
+                    exit(1)
             if not self.passw:
                 print("Password not given, Exiting")
-                sys.exit(1)
+                if self.do_raise:
+                    raise ValueError("No password was given")
+                else:
+                    exit(1)
 
         if self.serverurl:
             response = self.runner.run_bw_command(
@@ -77,7 +90,10 @@ class BitwardenLogin:
             else:
                 print("Login failed. Please check your credentials.")
                 print("Returned was: " + response.get("message"))
-                sys.exit(1)
+                if self.do_raise:
+                    raise ValueError("Login failed. Please check your credentials.\nReturned was: " + response.get("message"))
+                else:
+                    exit(1)
 
     def check_status(self):
         """Check the current Bitwarden status."""
@@ -93,12 +109,18 @@ class BitwardenLogin:
                 self.passw = getpass(prompt="Password: [hidden]")
             else:
                 print(
-                    "Noblocking was activated, but no password was given, Exiting"
+                    "Nonblocking was activated, but no password was given, Exiting"
                 )
-                sys.exit(1)
+                if self.do_raise:
+                    raise ValueError("Nonblocking was activated, but no password was given")
+                else:
+                    exit(1)
             if not self.passw:
                 print("Password not given, Exiting")
-                sys.exit(1)
+                if self.do_raise:
+                    raise ValueError("No password was given")
+                else:
+                    exit(1)
 
         unlock_response = self.runner.run_bw_command(
             ["unlock", self.passw, "--response"]
@@ -113,7 +135,10 @@ class BitwardenLogin:
                 if not self.cert_detector(syncresp, True):
                     print("Failed to unlock the vault.")
                     print("Returned was: " + syncresp.get("message"))
-                    sys.exit(1)
+                    if self.do_raise:
+                        raise RuntimeError("Failed to unlock the vault.\nReturned was: " + syncresp.get("message"))
+                    else:
+                        exit(1)
 
             self.passw = "-" * len(self.passw)
             self.passw = None
@@ -129,16 +154,22 @@ class BitwardenLogin:
             else:
                 print("Failed to unlock the vault.")
                 print("Returned was: " + unlock_response.get("message"))
-                sys.exit(1)
+                if self.do_raise:
+                    raise RuntimeError("Failed to unlock the vault.\nReturned was: " + syncresp.get("message"))
+                else:
+                    exit(1)
 
     def cert_detector(self, response, sync=False):
         if "self-signed certificate in certificate chain" in response.get(
             "message"
         ):
             if os.environ.get("NODE_EXTRA_CA_CERTS"):
-                print("Returned was: " + response.get("message"))
                 print("The set cert path was not set correctly, Exiting")
-                sys.exit(1)
+                print("Returned was: " + response.get("message"))
+                if self.do_raise:
+                    raise ValueError("The set cert path was not set correctly.\nReturned was: " + response.get("message"))
+                else:
+                    exit(1)
 
             print("Self singed certificate detected")
             print("On Unix Systems you may want to run:")
@@ -172,7 +203,10 @@ class BitwardenLogin:
                 print(
                     "Noblocking was activated, but no certfile argument was given, Exiting"
                 )
-                sys.exit(1)
+                if self.do_raise:
+                    raise ValueError("Nonblocking was activated, but no certfile argument was given")
+                else:
+                    exit(1)
 
             if path and os.path.isfile(path) and path.endswith(".pem"):
                 os.environ["NODE_EXTRA_CA_CERTS"] = os.path.abspath(path)
@@ -183,7 +217,10 @@ class BitwardenLogin:
                 return self.unlock_vault()
             else:
                 print("Cert file not given or invalid path, Exiting")
-                sys.exit(1)
+                if self.do_raise:
+                    raise ValueError("Cert file not given or invalid path")
+                else:
+                    exit(1)
         else:
             return None
 
@@ -214,7 +251,10 @@ class BitwardenLogin:
             return session_token
         else:
             print("There was some problem getting the session_token, Exiting")
-            sys.exit(1)
+            if self.do_raise:
+                raise RuntimeError("There was some problem getting the session_token")
+            else:
+                exit(1)
 
     def main(self):
         return self.return_session()

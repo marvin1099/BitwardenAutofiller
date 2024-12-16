@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='BitwardenAutofiller',
-    version='0.3.0',
+    version='0.4.0',
     author='marvin1099',
     description='A Bitwarden autofill script for non-browser applications',
     long_description=open('README.md').read(),
@@ -16,9 +16,13 @@ setup(
         'psutil',
         'cryptography'
     ],
+    extras_require={
+        'gui': ['pyside6'],  # Only GUI-specific dependencies
+    },
     entry_points={
         'console_scripts': [
-            'bitwardenautofiller = bitwardenautofiller:main'
+            'bitwardenautofiller = bitwardenautofiller:main',  # CLI entry point
+            'bwautofillergui = bwautofillergui:main'           # GUI entry point
         ],
     },
     classifiers=[

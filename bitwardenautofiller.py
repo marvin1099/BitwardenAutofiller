@@ -22,7 +22,15 @@ def main(args=None):
             "Running was diabled, this will only print arg settings, closing"
         )
 
-    if not daemon.is_running() and defaults.daemonmode:
+    drun = daemon.is_running()
+    if (not drun and defaults.daemonmode) or (defaults.daemonmode and not defaults.clientmode):
+        if drun:
+            print("Deaemon is already running, exiting")
+            if defaults.do_raise:
+                raise RuntimeError("Deaemon is already running")
+            else:
+                exit(1)
+
         # Initialize the bw login manager
         login = bwl.BitwardenLogin(runner, defaults)
 
@@ -43,9 +51,20 @@ def main(args=None):
         # Start the daemon
         daemon.start()
     elif defaults.clientmode:
+        if not drun:
+            print("Daemon is not running, closing client...")
+            if defaults.do_raise:
+                raise RuntimeError("Daemon is not running")
+            else:
+                exit(1)
         client = bwc.BitwardenClient(defaults)
         autofiller = auto.AutoFiller(client, defaults)
         autofiller.fill_process()
+        if autofiller.message and __name__ != "__main__":
+            return autofiller.message
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        print(f"Exception was triggerd:\n{e}\nClosing")

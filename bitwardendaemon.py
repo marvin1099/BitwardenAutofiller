@@ -15,6 +15,7 @@ import os
 class BitwardenDaemon(multiprocessing.Process):
     def __init__(self, runner, defaults):
         super().__init__()
+        self.stop_event = multiprocessing.Event()
         self.session_key = None
         self.runner = runner
         self.timeout = defaults.timeout
@@ -22,12 +23,12 @@ class BitwardenDaemon(multiprocessing.Process):
         self.port = defaults.port
         self.encryption = defaults.encryption
         self.saltfolder = defaults.saltfolder
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.do_raise = defaults.do_raise
+        self.sock = None
 
     def set_session_key(self, key):
         on_premise_key_local, _ = self.daemon_cript(True,"Key")
         self.session_key = encryption.encrypt_aes_256(key, on_premise_key_local)
-
 
     def daemon_cript(self, create=False, Extra="Comunication"):
         on_premise_key_local = (
@@ -65,13 +66,15 @@ class BitwardenDaemon(multiprocessing.Process):
                     salt = salty.read()
             if len(salt) < 32:
                 print("Error no salt file or short salt, exiting...")
-                exit(1)
+                if self.do_raise:
+                    raise ValueError("Error no salt file or short salt")
+                else:
+                    exit(1)
 
             # Encryption passphrase/key used for both encryption and decryption
             on_premise_key_local += self.encryption
             on_premise_key_local += salt
             return on_premise_key_local, saltfile
-
 
     def run(self):
         """Start the daemon process to listen for incoming requests."""
@@ -82,7 +85,13 @@ class BitwardenDaemon(multiprocessing.Process):
             print(
                 f"There was a issue with getting the bitwaden vault data: {cac.get("message")}\nExiting..."
             )
-            exit(1)
+            if self.do_raise:
+                raise ValueError(f"There was a issue with getting the bitwaden vault data: {cac.get("message")}")
+            else:
+                exit(1)
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
         self.sock.bind((self.host, self.port))
         self.sock.listen()
         if self.timeout > -1:
@@ -91,7 +100,7 @@ class BitwardenDaemon(multiprocessing.Process):
             f"Bitwarden CLI Daemon listening on {self.host}:{self.port}...\n"
         )
 
-        while True:
+        while not self.stop_event.is_set():
             try:
                 # Accept new connections
                 conn, addr = self.sock.accept()
@@ -101,16 +110,23 @@ class BitwardenDaemon(multiprocessing.Process):
                     self.sock.close()
                 except Exception as e:
                     pass
-                exit()
+                if self.do_raise:
+                    raise TimeoutError("Socket waiting timeout reached")
+                else:
+                    exit()
             except Exception as e:
                 print(
                     f"Error occored while waiting for the connection: {e}\nExiting..."
                 )
                 try:
                     self.sock.close()
-                except Exception as e:
+                except Exception as i:
                     pass
-                exit()
+
+                if self.do_raise:
+                    raise e
+                else:
+                    exit()
 
             with conn:
                 print(f"Connected by {addr}")
@@ -138,6 +154,9 @@ class BitwardenDaemon(multiprocessing.Process):
                     # Process the decrypted request
                     response = self.handle_request(decrypted_data)
 
+                    if self.stop_event.is_set():
+                        break
+
                     try:
                         # Encrypt the outgoing response (already bytes)
                         encrypted_response = encryption.encrypt_aes_256(
@@ -164,6 +183,10 @@ class BitwardenDaemon(multiprocessing.Process):
                         f"Finished connection, listening too new connections...\n"
                     )
                     break  # break to listen to new connections
+        self.sock.close()
+
+    def stop(self):
+        self.stop_event.set()
 
     def handle_request(self, request):
         """Process the incoming request and run the appropriate Bitwarden command."""
@@ -184,7 +207,8 @@ class BitwardenDaemon(multiprocessing.Process):
                     saltfile.unlink()
                 self.runner.cache_cript(delete=True)
 
-                exit()
+                self.stop()
+
             elif command:
                 # Append the session key to the command
                 argcp = list(args)
@@ -232,4 +256,6 @@ class BitwardenDaemon(multiprocessing.Process):
             except ConnectionRefusedError:
                 return False
             except socket.error:
+                return False
+            except Exception as e:
                 return False

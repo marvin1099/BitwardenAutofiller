@@ -17,12 +17,8 @@ if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
 Write-Host "Upgrading pip..."
 python -m  pip install --upgrade pip
 
-# Install dependencies from setup.py
-Write-Host "Installing dependencies from setup.py..."
-pip install -e .
-
 # Ensure shiv and pyinstaller are installed
-$deps = @("shiv", "pyinstaller")
+$deps = @("pyinstaller")
 foreach ($dep in $deps) {
     if (-not (pip show $dep | Out-Null)) {
         Write-Host "Installing $dep..."
@@ -45,8 +41,14 @@ if ($upx_path) {
 Write-Host "Building Windows binary..."
 pyinstaller --onefile --strip --clean --name BitwardenAutofillerWindows $upxFlag bitwardenautofiller.py
 
-# Building the universal .pyz is disabled on windows as it did not finish successfully
-# Write-Host "Building universal .pyz..."
-# shiv -o dist/BitwardenAutofiller.pyz -e bitwardenautofiller.main:main .
+# Build CLI Linux binary
+Write-Host "Building Windows binary..."
+pip install .
+pyinstaller --onefile --strip --noconfirm --clean --exclude-module PySide6 --exclude-module tkinter --name BWAutofillerWindowsCLI $upx_flag bitwardenautofiller.py
+
+# Build GUI Linux binary
+Write-Host "Building GUI Linux binary..."
+pip install .[gui]
+pyinstaller --onefile --strip --noconfirm --clean --exclude-module tkinter --add-data "fillericon.png:." --name BWAutofillerWindowsGUI $upx_flag bwautofillergui.py
 
 Write-Host "Build complete!"

@@ -55,7 +55,10 @@ class BitwardenRunner:
                     salt = salty.read()
             if len(salt) < 32:
                 print("Error no salt file or short salt, exiting...")
-                exit(1)
+                if self.do_raise:
+                    raise ValueError("Error no salt file or short salt")
+                else:
+                    exit(1)
 
             # Encryption passphrase/key used for both encryption and decryption
             on_premise_key_local += self.encryption
@@ -220,7 +223,13 @@ class BitwardenRunner:
                 return result
         except FileNotFoundError as e:
             print(f"An error occurred: {e}")
-            exit(1)
+            if self.do_raise:
+                raise FileNotFoundError(f"Error file missing: {e}")
+            else:
+                exit(1)
         except Exception as e:
             print(f"An error occurred: {e}")
-            exit(1)
+            if self.do_raise:
+                raise e
+            else:
+                exit(1)

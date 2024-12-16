@@ -2,7 +2,6 @@
 
 import argparse
 
-
 class Defaults:
     def __init__(self):
         self.bw_path = "bw"
@@ -141,9 +140,22 @@ class Defaults:
             action="store_true",
             help="Sync Bitwarden vault (for client)",
         )
+        parser.add_argument(
+            "-r",
+            "--raise",
+            action="store_true",
+            dest="do_raise",
+            help="Raise error instead of exiting on error (usefull for the gui)",
+        )
+        # Suppress the cli argument as it may be passed from users that copyed the gui app command
+        parser.add_argument(
+            '-cli',
+            action="store_true",
+            help=argparse.SUPPRESS
+        )
 
         # Parse the arguments; if args are provided, use them
-        if args:
+        if args != None:
             parsed_args = parser.parse_args(args)
         else:
             parsed_args = parser.parse_args()
@@ -284,6 +296,13 @@ class Defaults:
             self.sync = True
         else:
             self.sync = False
+
+        if parsed_args.do_raise:
+            self.do_raise = True
+            print("Enabling raise on error")
+            something_printed = True
+        else:
+            self.do_raise = False
 
         if something_printed:
             print()

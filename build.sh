@@ -23,12 +23,8 @@ source .venv/bin/activate
 echo "Upgrading pip..."
 pip install --upgrade pip
 
-# Install dependencies from setup.py
-echo "Installing dependencies from setup.py..."
-pip install -e .
-
 # Ensure shiv and pyinstaller are installed
-for dep in shiv pyinstaller; do
+for dep in pyinstaller; do
     if ! pip show "$dep" > /dev/null 2>&1; then
         echo "Installing $dep..."
         pip install "$dep"
@@ -45,13 +41,14 @@ else
     upx_flag=""
 fi
 
+# Build CLI Linux binary
+echo "Building CLI Linux binary..."
+pip install .
+pyinstaller --onefile --strip --noconfirm --clean --exclude-module PySide6 --exclude-module tkinter --name BWAutofillerLinuxCLI $upx_flag bitwardenautofiller.py
 
-# Build Linux binary
-echo "Building Linux binary..."
-pyinstaller --onefile --strip --noconfirm --clean --name BitwardenAutofillerLinux $upx_flag bitwardenautofiller.py
-
-# Build universal .pyz
-echo "Building universal .pyz..."
-shiv -o dist/BitwardenAutofiller.pyz -e bitwardenautofiller.main:main .
+# Build GUI Linux binary
+echo "Building GUI Linux binary..."
+pip install .[gui]
+pyinstaller --onefile --strip --noconfirm --clean --exclude-module tkinter --add-data "fillericon.png:." --name BWAutofillerLinuxGUI $upx_flag bwautofillergui.py
 
 echo "Build complete!"

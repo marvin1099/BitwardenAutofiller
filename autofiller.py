@@ -14,6 +14,8 @@ class AutoFiller:
         self.actions = defaults.fillactions
         self.close = defaults.close
         self.sync = defaults.sync
+        self.do_raise = defaults.do_raise
+        self.message = None
 
     def get_active_process(self):
         try:
@@ -171,45 +173,53 @@ class AutoFiller:
 
     def fill_process(self):
         """Main function to perform autofill based on the active process."""
+        self.message = None
         if self.close:
             self.sender("exit")
-            print("Send exit command to deamon and now closing client...")
-            exit()
-        if self.sync:
-            sres = self.sender("sync")
-            cac = self.sender(
-                "list", ["items"]
-            )  # run list command to cache results
-            if not sres.get("success"):
-                print(f"Problem syncing, skipping: {sres.get("message")}")
-            else:
-                print("Syncing successful")
-            if not cac.get("success"):
-                print(
-                    f"There was a issue with getting the bitwaden vault data {cac.get("message")}\nExiting..."
-                )
-                exit(1)
-
-        process_info = self.get_active_process()
-        if process_info.get("name"):
-            process_name = process_info.get("name")
-
-            login_items = self.get_login_ids(process_name)
-            if login_items and login_items.get("success"):
-                print("Login item retrieved successfully.")
-                # Proceed to autofill (not implemented yet)
-                for item_id, actions in self.accountselect(
-                    login_items.get("returns", []), self.actions
-                ):
-                    if item_id:
-                        self.autofill(item_id, actions)
-                    else:
-                        print("Actions not set or valid, closing...")
-            elif login_items.get("message") == "Not found.":
-                print("No login item with that process name, closing...")
-            else:
-                print(
-                    f"Failed to retrieve login item with message: {login_items.get("message")}\nClosing..."
-                )
+            print("Exit command was send to deamon and now closing client...")
+            self.message = "Exit command was send to deamon"
         else:
-            print("Could not determine the active process.")
+            if self.sync:
+                sres = self.sender("sync")
+                cac = self.sender(
+                    "list", ["items"]
+                )  # run list command to cache results
+                if not sres.get("success"):
+                    print(f"Problem syncing, skipping: {sres.get("message")}")
+                else:
+                    print("Syncing successful")
+                if not cac.get("success"):
+                    print(
+                        f"There was a issue with getting the bitwaden vault data {cac.get("message")}\nExiting..."
+                    )
+                    if self.do_raise:
+                        raise ValueError(f"There was a issue with getting the bitwaden vault data {cac.get("message")}")
+                    else:
+                        exit(1)
+
+            process_info = self.get_active_process()
+            if process_info.get("name"):
+                process_name = process_info.get("name")
+
+                login_items = self.get_login_ids(process_name)
+                if login_items and login_items.get("success"):
+                    print("Login item retrieved successfully.")
+                    for item_id, actions in self.accountselect(
+                        login_items.get("returns", []), self.actions
+                    ):
+                        if item_id:
+                            self.autofill(item_id, actions)
+                        else:
+                            print("Actions not set or valid, closing...")
+                            self.message = "Actions not set or valid"
+                elif login_items.get("message") == "Not found.":
+                    print("No login item with that process name, closing...")
+                    self.message = "No login item with that process name"
+                else:
+                    print(
+                        f"Failed to retrieve login item with message: {login_items.get("message")}\nClosing..."
+                    )
+                    self.message = f"Failed to retrieve login item with message: {login_items.get("message")}"
+            else:
+                print("Could not determine the active process.")
+                self.message = "Could not determine the active process."
