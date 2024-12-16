@@ -1,6 +1,9 @@
 # Bitwarden Autofill Script
 
-This Bitwarden autofill script automates the process of filling in login credentials on desktop applications. It leverages Bitwarden's CLI to retrieve and input usernames, passwords, and TOTP codes into non-browser apps, solving the browser-only limitation of Bitwarden's native autofill feature. The project now includes a GUI version that makes it easier to run the autofiller if you don't know the terminal.
+This Bitwarden autofill script automates the process of filling in login credentials on desktop applications.  
+It leverages Bitwarden's CLI to retrieve and input usernames, passwords, and TOTP codes into non-browser apps,  
+solving the browser-only limitation of Bitwarden's native autofill feature.  
+The project now includes a GUI version that makes it easier to run the autofiller if you don't know the terminal.
 
 ## Features
 
@@ -30,8 +33,8 @@ This ensures that data at rest and in transit is protected, minimizing the risk 
 
 ## Downloads
 
-You can download the [latest binary releases from here](https://codeberg.org/marvin1099/BitwardenAutofiller/releases). 
-Both GUI and CLI versions can be downloaded there. 
+You can download the [latest binary releases from here](https://codeberg.org/marvin1099/BitwardenAutofiller/releases).  
+Both GUI and CLI versions can be downloaded there.  
 After downloading the binary, **continue reading at the [Usage](#usage) section** to understand how to run the script.
 
 If you want to build the project from source or run it directly in a development environment,  
@@ -40,14 +43,14 @@ If you want to build the project from source or run it directly in a development
 ## Installation (For Running From Source)
 
 1. **Clone the repository:**
-   Git is need for this step, make shure you install it and add it to your PATH.
+   Git is need for this step, make shure you install it and add it to your PATH.  
    ```bash
    git clone https://codeberg.org/marvin1099/BitwardenAutofiller.git
    cd BitwardenAutofiller
    ```
 
 2. **Create a virtual environment (Linux users):**
-   This step can be skipped on Windows. On Linux run the following in a bash console:
+   This step can be skipped on Windows. On Linux run the following in a bash console:  
    ```bash
    python -m venv .venv
    source .venv/bin/activate
@@ -59,17 +62,17 @@ If you want to build the project from source or run it directly in a development
    ```
 
 4. **Bitwarden CLI:**
-   Ensure the Bitwarden CLI (`bw`) is installed and accessible in your system's PATH. 
-   You can also provide a custom path for the `bw` cli tool, if you don't want it in your PATH.
+   Ensure the Bitwarden CLI (`bw`) is installed and accessible in your system's PATH.  
+   You can also provide a custom path for the `bw` cli tool, if you don't want it in your PATH.  
    You can download and install it from the [official Bitwarden CLI page](https://bitwarden.com/help/article/cli/).
 
-5. **Continue reading at the [Usage](#usage) section** to understand how to run the script.
+5. **Continue reading at the [Usage](#usage) section** to understand how to run the script.  
    **Otherwise continue reading** for building from source.  
 
 ### Building From Source
 
 1. **Clone the repository (if not already done):**
-   Git is need for this step, make shure you install it and add it to your PATH.
+   Git is need for this step, make shure you install it and add it to your PATH.  
    ```bash
    git clone https://codeberg.org/marvin1099/BitwardenAutofiller.git
    cd BitwardenAutofiller
@@ -92,7 +95,6 @@ If you want to build the project from source or run it directly in a development
 ## Usage
 
 If running the script from source use following command:
-
 ```bash
 python bitwardenautofiller.py
 ```
@@ -101,7 +103,7 @@ And use the following if you want the gui instead:
 python bwautofillergui.py
 ```
 
-Otherwise if you use binarys run / dobble click the file: 
+Otherwise if you use binarys run / dobble click the file:  
 - `BitwardenAutofillerWindowsCLI.exe` on Windows (for the CLI)
 - `BitwardenAutofillerWindowsGUI.exe` on Windows (for the GUI)
 - `BitwardenAutofillerLinuxCLI` on Linux (for the CLI)
