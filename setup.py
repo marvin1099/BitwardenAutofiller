@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='BitwardenAutofiller',
-    version='0.4.0',
+    version='0.5.0',
     author='marvin1099',
     description='A Bitwarden autofill script for non-browser applications',
     long_description=open('README.md').read(),
