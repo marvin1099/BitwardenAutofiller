@@ -37,17 +37,13 @@ if ($upx_path) {
     Write-Output "UPX not found. Skipping UPX integration."
 }
 
-# Build Windows binary
-Write-Host "Building Windows binary..."
-pyinstaller --onefile --strip --clean --name BitwardenAutofillerWindows $upxFlag bitwardenautofiller.py
-
-# Build CLI Linux binary
+# Build CLI Windows binary
 Write-Host "Building Windows binary..."
 pip install .
 pyinstaller --onefile --strip --noconfirm --clean --exclude-module PySide6 --exclude-module tkinter --name BWAutofillerWindowsCLI $upx_flag bitwardenautofiller.py
 
-# Build GUI Linux binary
-Write-Host "Building GUI Linux binary..."
+# Build GUI Windows binary
+Write-Host "Building GUI Windows binary..."
 pip install .[gui]
 pyinstaller --onefile --strip --noconfirm --clean --exclude-module tkinter --add-data "fillericon.png:." --name BWAutofillerWindowsGUI $upx_flag bwautofillergui.py
 
