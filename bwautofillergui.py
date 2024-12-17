@@ -304,6 +304,8 @@ class BitwardenAutofillerGUI(QMainWindow):
 
     def prepare_arguments(self):
         args = []
+        dargs = []
+        cargs = []
 
         # Enable non-blocking mode as the console is not used for the gui app
         args.append('-n')
@@ -311,65 +313,74 @@ class BitwardenAutofillerGUI(QMainWindow):
         # Enable raise of errors
         args.append('-r')
 
+        # Mode Selection
+        d = False
+        c = False
+        if self.daemon_mode:
+            d = True
+            self.daemon_mode = False
+            dargs.append('-d')
+        if self.client_mode:
+            c = True
+            self.client_mode = False
+            cargs.append('-c')
+
         # Server URL
-        if self.server_url_input.text():
-            args.extend(['-s', self.server_url_input.text()])
+        if self.server_url_input.text() and d:
+            dargs.extend(['-s', self.server_url_input.text()])
 
         # Certificate File
-        if self.cert_file_input.text():
-            args.extend(['-cf', self.cert_file_input.text()])
+        if self.cert_file_input.text() and d:
+            dargs.extend(['-cf', self.cert_file_input.text()])
 
         # Logout
-        if self.logout_check.isChecked():
-            args.append('-l')
+        if self.logout_check.isChecked() and d:
+            dargs.append('-l')
 
         # Credentials
-        if self.email_input.text():
-            args.extend(['-m', self.email_input.text()])
+        if self.email_input.text() and d:
+            dargs.extend(['-m', self.email_input.text()])
         if self.password_input.text():
-            args.extend(['-p', self.password_input.text()])
+            dargs.extend(['-p', self.password_input.text()])
 
         # Additional Encryption
         if self.encryption_input.text():
             args.extend(['-e', self.encryption_input.text()])
 
-        # Mode Selection
-        if self.daemon_mode:
-            self.daemon_mode = False
-            args.append('-d')
-        if self.client_mode:
-            self.client_mode = False
-            args.append('-c')
-
         # Bitwarden CLI Path
-        if self.cli_path_input.text() != 'bw':
-            args.extend(['-bw', self.cli_path_input.text()])
+        if self.cli_path_input.text() != 'bw' and d:
+            dargs.extend(['-bw', self.cli_path_input.text()])
 
         # Daemon Timeout
-        if self.timeout_spinbox.value() != 3600:
-            args.extend(['-t', str(self.timeout_spinbox.value())])
+        if self.timeout_spinbox.value() != 3600 and d:
+            dargs.extend(['-t', str(self.timeout_spinbox.value())])
 
         # Salt Folder
         if self.salt_folder_check.isChecked():
             args.append('-sf')
 
         # Local IP and Port
-        if self.ip_input.text() != '127.0.0.1':
-            args.extend(['-ip', self.ip_input.text()])
-        if self.port_input.text() != '64756':
-            args.extend(['-lp', self.port_input.text()])
+        if self.ip_input.text() != '127.0.0.1' and c:
+            cargs.extend(['-ip', self.ip_input.text()])
+        if self.port_input.text() != '64756' and c:
+            cargs.extend(['-lp', self.port_input.text()])
 
         # Fill Actions
-        if self.fill_actions_input.text() != 'C14724635':
-            args.extend(['-f', self.fill_actions_input.text()])
+        if self.fill_actions_input.text() != 'C14724635' and c:
+            cargs.extend(['-f', self.fill_actions_input.text()])
 
         if self.exit_daemon:
             self.exit_daemon = False
             if not self.client_mode:
-                args.append('-c')
-            args.append('-x')
+                cargs.append('-c')
+            cargs.append('-x')
 
-        return args
+        if c and not d:
+            return args + cargs
+        elif d and not c:
+            return args + dargs
+
+        return args + dargs + cargs
 
     def resource_path(self, relative_path):
         """Get absolute path to resource, works for dev and PyInstaller"""
@@ -417,7 +428,7 @@ class BitwardenAutofillerGUI(QMainWindow):
             script_path = os.path.abspath(sys.executable)
         else:  # Running as a regular Python script
             script_path = os.path.abspath(__file__)
-        args = [script_path + '-cli'] + self.prepare_arguments()
+        args = [script_path, '-cli'] + self.prepare_arguments()
         copyargs = "'" + "' '".join(args) + "'"
         clipboard.copy(copyargs)
         QMessageBox.information(self, "Success", f"The BitwardenAutofiller client command was successfully copied into the clipboard\nYou can now add this command to a hotkey progam")
