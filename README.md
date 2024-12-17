@@ -120,14 +120,21 @@ For example, if your application is called `steam`,
 you should add `pcprocess://steam` as a URL in the Bitwarden GUI app under your steam account entry.  
 Always use the format `pcprocess://<app_name>` for applications you want to autofill.
 
+**ALSO** the password and mail arguments are manly for the gui.  
+It is more secure if you do not add the mail and password the cli.  
+Instead running the script in a terminal will automatically ask you for the password.  
+This is more secure then using the cli arguments.  
+In the gui the cli is imported so no arguments ever leave the app.  
+Therefore the gui is secure too. 
+
 ### Command-line Arguments
 
 The script supports the following command-line options for flexible usage:
 
-- `-s, --serverurl`: URL that Bitwarden uses.
+- `-s, --serverurl`: URL that Bitwarden uses (set once; will be saved).
 - `-cf, --certfile`: Path to the certificate file (if Bitwarden is self-signed).
 - `-l, --logout`: Logout from Bitwarden (fixes sync issues, relogin needed).
-- `-p, --password`: Bitwarden vault password.
+- `-p, --password`: Bitwarden vault password (only use if needed; the automatic input field is safer).
 - `-m, --mail`: Bitwarden vault email.
 - `-e, --encryption`: Additional password for encryption.
 - `-d, --daemonmode`: Start in daemon mode only.
