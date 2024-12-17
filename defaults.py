@@ -157,6 +157,7 @@ class Defaults:
         # Parse the arguments; if args are provided, use them
         if args != None:
             parsed_args = parser.parse_args(args)
+            del args
         else:
             parsed_args = parser.parse_args()
 
@@ -304,5 +305,6 @@ class Defaults:
         else:
             self.do_raise = False
 
+        del parsed_args
         if something_printed:
             print()
