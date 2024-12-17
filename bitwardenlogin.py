@@ -17,6 +17,7 @@ class BitwardenLogin:
         self.certfile = defaults.certfile
         self.serverurl = defaults.serverurl
         self.do_raise = defaults.do_raise
+        del defaults.passw
 
     def get_session_token(self):
         """Login to Bitwarden and retrieve a session token."""
@@ -75,7 +76,7 @@ class BitwardenLogin:
         )
 
         if response.get("success"):
-            self.passw = "-" * len(self.passw)
+            del self.passw
             self.passw = None
             session_key = response["data"]["raw"]
             print(f"Login successful. Returning session key")
@@ -84,7 +85,7 @@ class BitwardenLogin:
             session_key = self.cert_detector(response)
             if session_key:
                 if self.passw:
-                    self.passw = "-" * len(self.passw)
+                    del self.passw
                 self.passw = None
                 return session_key
             else:
@@ -140,14 +141,14 @@ class BitwardenLogin:
                     else:
                         exit(1)
 
-            self.passw = "-" * len(self.passw)
+            del self.passw
             self.passw = None
 
             print(f"Vault unlocked. Returning session key")
             return session_key
         else:
             session_key = self.cert_detector(unlock_response)
-            self.passw = "-" * len(self.passw)
+            del self.passw
             self.passw = None
             if session_key:
                 return session_key
