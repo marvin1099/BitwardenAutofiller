@@ -393,6 +393,7 @@ class BitwardenAutofillerGUI(QMainWindow):
         try:
             args = self.prepare_arguments()
             ret = bitwardenautofiller.main(args)
+            del args # forget args for security
             if daemon_mode and not ierr:
                 QMessageBox.information(self, "Success", "The BitwardenAutofiller daemon was successfully started in the backround!")
                 self.tab_widget.setCurrentIndex(1)
