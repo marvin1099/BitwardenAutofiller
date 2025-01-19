@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import subprocess
 import clipboard
 import pyautogui
 import pywinctl
@@ -125,6 +126,38 @@ class AutoFiller:
         else:
             yield None, None
 
+    def write_to_gui(self, text=""):
+        # Check if xdotool is available
+        xdotool_available = platform.system() in ["Linux", "Darwin"] and subprocess.run(
+            ["which", "xdotool"], stdout=subprocess.DEVNULL
+        ).returncode == 0
+
+        if not xdotool_available:  # Write the full text at once if xdotool isn't available
+            pyautogui.write(text)
+            return
+
+        # Function to flush the buffer
+        def flush(buffer, use_xdo):
+            if buffer:
+                if use_xdo:
+                    for c in buffer:
+                        subprocess.run(["xdotool", "type", c])
+                else:
+                    pyautogui.write("".join(buffer))
+            buffer.clear()
+
+        # Separate and write alphanumeric and special characters
+        buffer, is_alnum = [], text[0].isalnum() if text else None
+        for char in text:
+            if char.isalnum() == is_alnum:
+                buffer.append(char)
+            else:
+                flush(buffer, use_xdo=not is_alnum)
+                buffer.append(char)
+                is_alnum = char.isalnum()
+
+        flush(buffer, use_xdo=not is_alnum)
+
     def autofill(self, login_id, actions):
         item = self.get_login_item(login_id)
         logindata = item.get("data", {}).get("login", {})
@@ -163,7 +196,7 @@ class AutoFiller:
                     else:
                         store = ""
                 elif action == "4" and store:
-                    pyautogui.write(store)
+                    self.write_to_gui(store)
                 elif action == "5" and store:
                     clipboard.copy(store)
                 elif action == "6":
@@ -214,7 +247,7 @@ class AutoFiller:
                             self.message = "Actions not set or valid"
                 elif login_items.get("message") == "Not found.":
                     print("No login item with that process name, closing...")
-                    self.message = "No login item with that process name"
+                    self.message = f"No login item with the process name {process_name}\nAdd uri pcprocess://{process_name} to the bitwarden vault"
                 else:
                     print(
                         f"Failed to retrieve login item with message: {login_items.get("message")}\nClosing..."

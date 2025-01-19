@@ -359,6 +359,10 @@ class BitwardenAutofillerGUI(QMainWindow):
         if self.salt_folder_check.isChecked():
             args.append('-sf')
 
+         # Salt Folder
+        if self.sync_vault_check.isChecked():
+            args.append('-y')
+
         # Local IP and Port
         if self.ip_input.text() != '127.0.0.1' and c:
             cargs.extend(['-ip', self.ip_input.text()])
@@ -399,9 +403,13 @@ class BitwardenAutofillerGUI(QMainWindow):
                 self.tab_widget.setCurrentIndex(1)
             elif not ierr:
                 if not ret:
-                    QMessageBox.information(self, "Success", "The BitwardenAutofiller client successfully retived and filled the vault data!")
+                    msg_box = QMessageBox(QMessageBox.Information, "Success", "The BitwardenAutofiller client successfully retrieved and filled the vault data!", parent=self)
+                    msg_box.setWindowFlag(Qt.WindowDoesNotAcceptFocus)
+                    msg_box.exec()
                 else:
-                    QMessageBox.information(self, "Success", f"The BitwardenAutofiller client successfully ran but returned:\n{ret}")
+                    msg_box = QMessageBox(QMessageBox.Information, "Success", f"The BitwardenAutofiller client successfully ran but returned:\n{ret}", parent=self)
+                    msg_box.setWindowFlag(Qt.WindowDoesNotAcceptFocus)
+                    msg_box.exec()
         except Exception as e:
             if not ierr:
                 QMessageBox.critical(self, "Error", f"An error occurred:\n{str(e)}")
