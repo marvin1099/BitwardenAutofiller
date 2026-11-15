@@ -48,6 +48,7 @@ class BitwardenCLI:
         response = self._invoke(
             ["login", email, "--passwordenv", PASSWORD_ENVIRONMENT_VARIABLE],
             password=password,
+            clear_session=True,
         )
         return _session_key(response)
 
@@ -56,6 +57,7 @@ class BitwardenCLI:
         response = self._invoke(
             ["unlock", "--passwordenv", PASSWORD_ENVIRONMENT_VARIABLE],
             password=password,
+            clear_session=True,
         )
         return _session_key(response)
 
@@ -76,6 +78,7 @@ class BitwardenCLI:
         *,
         password: str | None = None,
         session_key: str | None = None,
+        clear_session: bool = False,
     ) -> dict[str, Any]:
         argv = [*self.executable, *arguments]
         if "--response" not in argv:
@@ -83,6 +86,9 @@ class BitwardenCLI:
 
         environment = os.environ.copy()
         environment["BW_NOINTERACTION"] = "true"
+        environment.pop(PASSWORD_ENVIRONMENT_VARIABLE, None)
+        if clear_session:
+            environment.pop("BW_SESSION", None)
         if password is not None:
             environment[PASSWORD_ENVIRONMENT_VARIABLE] = password
         if session_key is not None:

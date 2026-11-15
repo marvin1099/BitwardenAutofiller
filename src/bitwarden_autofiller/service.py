@@ -56,6 +56,16 @@ class VaultService:
         credentials = credentials_from_response(response)
         if credentials.id != item_id:
             raise ValueError("Bitwarden CLI returned a different item than requested")
+        verified_mapping = LoginSummary(
+            credentials.id,
+            "",
+            credentials.username or "",
+            credentials.uris,
+        )
+        if not matching_logins((verified_mapping,), app_id):
+            raise ItemNotMatchedError(
+                "The selected login no longer matches the active application"
+            )
         return credentials
 
     def get_totp(self, app_id: str, item_id: str) -> str:

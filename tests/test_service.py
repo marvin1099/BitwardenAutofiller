@@ -9,6 +9,7 @@ from bitwarden_autofiller.vault import LoginCredentials, LoginSummary
 class FakeBitwardenCLI:
     def __init__(self) -> None:
         self.calls: list[tuple[list[str], str]] = []
+        self.detail_uris = [{"uri": "pcprocess://steam"}]
         self.items = [
             {
                 "id": "steam-login",
@@ -42,7 +43,11 @@ class FakeBitwardenCLI:
                 "data": {
                     "data": {
                         "id": "steam-login",
-                        "login": {"username": "alice", "password": "selected-only"},
+                        "login": {
+                            "username": "alice",
+                            "password": "selected-only",
+                            "uris": self.detail_uris,
+                        },
                     }
                 },
             }
@@ -70,7 +75,10 @@ def test_service_fetches_only_the_selected_matching_login() -> None:
     credentials = service.get_login("steam", "steam-login")
 
     assert credentials == LoginCredentials(
-        "steam-login", username="alice", password="selected-only"
+        "steam-login",
+        username="alice",
+        password="selected-only",
+        uris=("pcprocess://steam",),
     )
     assert [call[0] for call in cli.calls].count(["get", "item", "steam-login"]) == 1
     assert all(session == "session-key-for-tests" for _, session in cli.calls)
@@ -84,6 +92,15 @@ def test_service_refuses_to_fetch_an_item_mapped_to_another_app() -> None:
         service.get_login("steam", "mail-login")
 
     assert not any(arguments[:2] == ["get", "item"] for arguments, _ in cli.calls)
+
+
+def test_service_rechecks_mapping_in_the_fetched_item() -> None:
+    cli = FakeBitwardenCLI()
+    cli.detail_uris = [{"uri": "pcprocess://mail"}]
+    service = VaultService(cli, "session-key-for-tests")
+
+    with pytest.raises(ItemNotMatchedError, match="no longer matches"):
+        service.get_login("steam", "steam-login")
 
 
 def test_totp_is_retrieved_only_when_requested() -> None:

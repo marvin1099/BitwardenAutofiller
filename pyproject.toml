@@ -11,9 +11,7 @@ license = "AGPL-3.0-or-later"
 requires-python = ">=3.12"
 authors = [{ name = "marvin1099" }]
 dependencies = [
-  "cryptography>=44.0",
   "platformdirs>=4.3",
-  "PyYAML>=6.0",
 ]
 
 [project.optional-dependencies]
@@ -28,6 +26,7 @@ wayland = ["eitype>=0.2.2,<0.3"]
 [project.scripts]
 bitwarden-autofiller = "bitwarden_autofiller.cli:main"
 bwautofillergui = "bitwarden_autofiller.gui:main"
+bitwarden-autofiller-daemon = "bitwarden_autofiller.daemon_cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/bitwarden_autofiller"]
@@ -51,6 +50,7 @@ pythonpath = ["src"]
 [tool.coverage.run]
 branch = true
 source = ["bitwarden_autofiller"]
+omit = ["*/bitwarden_autofiller/gui.py"]
 
 [tool.coverage.report]
 show_missing = true
@@ -71,3 +71,7 @@ mypy_path = "src"
 strict = true
 warn_unused_ignores = true
 no_implicit_optional = true
+
+[[tool.mypy.overrides]]
+module = ["PySide6.*"]
+ignore_missing_imports = true

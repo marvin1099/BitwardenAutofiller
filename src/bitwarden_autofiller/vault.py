@@ -26,6 +26,7 @@ class LoginCredentials:
     username: str | None = field(default=None, repr=False)
     password: str | None = field(default=None, repr=False)
     totp: str | None = field(default=None, repr=False)
+    uris: tuple[str, ...] = ()
 
 
 def matching_logins(
@@ -103,6 +104,7 @@ def credentials_from_response(response: Any) -> LoginCredentials:
         username=_optional_string(login.get("username")),
         password=_optional_string(login.get("password")),
         totp=_optional_string(login.get("totp")),
+        uris=_uri_values(login.get("uris")),
     )
 
 
@@ -121,3 +123,13 @@ def _optional_string(value: Any) -> str | None:
     if isinstance(value, str):
         return value or None
     return str(value)
+
+
+def _uri_values(value: Any) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        return ()
+    return tuple(
+        uri["uri"]
+        for uri in value
+        if isinstance(uri, dict) and isinstance(uri.get("uri"), str)
+    )

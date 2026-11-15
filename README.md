@@ -1,265 +1,164 @@
-# Bitwarden Autofill Script
+# Bitwarden Autofiller
 
-This Bitwarden autofill script automates the process of filling in login credentials on desktop applications.  
-It leverages Bitwarden's CLI to retrieve and input usernames, passwords, and TOTP codes into non-browser apps,  
-solving the browser-only limitation of Bitwarden's native autofill feature.  
-The project now includes a GUI version that makes it easier to run the autofiller if you don't know the terminal.
+Bitwarden Autofiller fills login fields in desktop applications using explicitly
+mapped Bitwarden Password Manager entries. It uses the official `bw` CLI, offers
+a command-line client and Qt GUI, and supports Wayland through the XDG Remote
+Desktop portal.
 
-## Features
+## Requirements
 
-- Automatically fills usernames, passwords, and TOTP codes into non-browser apps.
-- Supports customizable fill actions and sequences.
-- Operates in both daemon and client modes.
-- Offers additional security options with encryption for communication.
-- The GUI Provides a user-friendly interface to manage input options, configure settings, and control the daemon/client.
+- Python 3.12 or newer and [uv](https://docs.astral.sh/uv/)
+- The official Bitwarden Password Manager CLI (`bw`) on the machine that
+  accesses the vault
+- A desktop session for typing. Wayland requires an XDG Remote Desktop portal
+  and `libxkbcommon`; X11 and Windows use the optional PyAutoGUI backend.
 
-## Security
+## Install and run
 
-Encryption is implemented to ensure that sensitive data, such as passwords and communication between client and daemon, is securely handled:
+Install the GUI and Wayland input support on Linux/Wayland:
 
-- **Encryption for Communication**: All communication between the client and the daemon is encrypted using `AES-256`. The encryption passphrase is derived from a combination of:
-  - A **hardcoded password**
-  - An **optional user-specified password** that can be set using the `--encryption` flag
-  - A **salt**, which is stored in a hardcoded file location.
-  
-- **Passphrase Hashing**: The passphrase generated from the above components is hashed using `SHA-256`,  
-  and the resulting hash is used as the key for AES-256 encryption.
-
-- **Encrypted Command Caching**: Commands sent to the Bitwarden autofill runner are cached in an encrypted format,  
-  which helps protect against memory-based attacks. Even if an attacker gains access to the cache,  
-  the commands remain encrypted and unusable without the correct passphrase.
-
-This ensures that data at rest and in transit is protected, minimizing the risk of sensitive information leakage.
-
-## Downloads
-
-You can download the [latest binary releases from here](https://codeberg.org/marvin1099/BitwardenAutofiller/releases).  
-Both GUI and CLI versions can be downloaded there.  
-After downloading the binary, **continue reading at the [Usage](#usage) section** to understand how to run the script.
-
-If you want to build the project from source or run it directly in a development environment,  
-**continue reading** for the setup instructions.
-
-## Installation (For Running From Source)
-
-1. **Clone the repository:**
-   Git is need for this step, make shure you install it and add it to your PATH.  
-   ```bash
-   git clone https://codeberg.org/marvin1099/BitwardenAutofiller.git
-   cd BitwardenAutofiller
-   ```
-
-2. **Create a virtual environment (Linux users):**
-   This step can be skipped on Windows. On Linux run the following in a bash console:  
-   ```bash
-   python -m venv .venv
-   source .venv/bin/activate
-   ```
-
-3. **Install required dependencies:**
-   ```bash
-   # for cli
-   pip install .
-   # for gui (can be skipped if you dont need the gui)
-   pip install .[gui]
-   ```
-
-4. **Bitwarden CLI:**
-   Ensure the Bitwarden CLI (`bw`) is installed and accessible in your system's PATH.  
-   You can also provide a custom path for the `bw` cli tool, if you don't want it in your PATH.  
-   You can download and install it from the [official Bitwarden CLI page](https://bitwarden.com/help/article/cli/).
-
-5. **Continue reading at the [Usage](#usage) section** to understand how to run the script.  
-   **Otherwise continue reading** for building from source.  
-
-### Building From Source
-
-1. **Clone the repository (if not already done):**
-   Git is need for this step, make shure you install it and add it to your PATH.  
-   ```bash
-   git clone https://codeberg.org/marvin1099/BitwardenAutofiller.git
-   cd BitwardenAutofiller
-   ```
-   Run this `in PowerShell on Windows` or `a bash console on Linux`.
-
-2. **Build the binary:**
-   - On **Windows**, run:
-     ```powershell
-     powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1
-     ```
-   - On **Linux**, run:
-     ```bash
-     ./build.sh
-     ```
-   (Note: The `.venv` creation is automatic during the Linux build.)
-
-3. The binary files will be located in the `dist` folder.  
-
-## Usage
-
-If running the script from source use following command:
-```bash
-python bitwardenautofiller.py
-```
-And use the following if you want the gui instead:
-```bash
-python bwautofillergui.py
+```sh
+uv sync --extra gui --extra wayland
+uv run bwautofillergui
 ```
 
-Otherwise if you use binarys run / dobble click the file:  
-- `BitwardenAutofillerWindowsCLI.exe` on Windows (for the CLI)
-- `BitwardenAutofillerWindowsGUI.exe` on Windows (for the GUI)
-- `BitwardenAutofillerLinuxCLI` on Linux (for the CLI)
-- `BitwardenAutofillerLinuxGUI` on Linux (for the GUI)
+For an X11 or Windows CLI/GUI installation, use the `desktop` extra instead:
 
-#### IMPORTANT
-To make autofill work, you must add the program name as a URL entry in the app entry.  
-So if you have a browser autofill account for your app you just add the URL there.  
-Otherwise you add the URL to a new entry and input your username and password as usual.  
-For example, if your application is called `steam`,  
-you should add `pcprocess://steam` as a URL in the Bitwarden GUI app under your steam account entry.  
-Always use the format `pcprocess://<app_name>` for applications you want to autofill.
-
-**ALSO** the password and mail arguments are manly for the gui.  
-It is more secure if you do not add the mail and password the cli.  
-Instead running the script in a terminal will automatically ask you for the password.  
-This is more secure then using the cli arguments.  
-In the gui the cli is imported so no arguments ever leave the app.  
-Therefore the gui is secure too. 
-
-### Command-line Arguments
-
-The script supports the following command-line options for flexible usage:
-
-- `-s, --serverurl`: URL that Bitwarden uses (set once; will be saved).
-- `-cf, --certfile`: Path to the certificate file (if Bitwarden is self-signed).
-- `-l, --logout`: Logout from Bitwarden (fixes sync issues, relogin needed).
-- `-p, --password`: Bitwarden vault password (only use if needed; the automatic input field is safer).
-- `-m, --mail`: Bitwarden vault email.
-- `-e, --encryption`: Additional password for encryption.
-- `-d, --daemonmode`: Start in daemon mode only.
-- `-c, --clientmode`: Start in client mode only.
-- `-nm, --nomode`: Do not start the daemon or client (for testing argument setup).
-- `-bw, --bitwardenclipath`: Path to Bitwarden CLI (default is 'bw').
-- `-n, --noblocking`: Non-blocking/non-interactive mode.
-- `-t, --daemontimeout`: Set the daemon connection timeout.
-- `-sf, --saltfolder`: Create the saltfiles in a subfolder in /tmp  
-    (usefull for file sync, when daemon and client are on 2 PCs).
-- `-ip, --localip`: Local IP address for the daemon server (default is '127.0.0.1').
-- `-lp, --localport`: Local port for the daemon server (default is '64756').
-- `-f, --fillactions`: Set custom fill actions for autofill  
-    (Default: `C14724635`, a sequence of actions: 1 = user, 2 = pass, 3 = totp, 4 = type, 5 = copy,  
-    6 = newline, 7 = tab, A = next account, B = previous account, C = first account, D = last account).
-- `-x, --closedaemon`: Send a close signal to the daemon.
-- `-y, --sync`: Sync the Bitwarden vault.
-- `-r, --raise`: raises errors instead of exiting (used for the gui)
-- `-cli`: CAN ONLY BE USED WITH THE GUI, will bypass the GUI and make the GUI like the CLI.
-
-For more details, run:
-```bash
-python bitwardenautofiller.py -h
-```
-If you have the GUI version it sould be easy enoght to understand.  
-but if not you can bypass the gui as mentioned to run cli stiuff with the gui binary.  
-for that you would run the command:
-```bash
-python bwautofillergui.py -cli -h
-```
-This would then display the cli help.
-
-To run the CLI binary versions with arguments open a terminal and run:  
-- `"BWAutofillerWindowsCLI.exe" -h` on Windows.  
-- `"BWAutofillerLinuxCLI" -h` on Linux.  
-
-If you use the GUI you probably wont need to use the cli.  
-Just dobble click / run:
-- `"BWAutofillerWindowsGUI.exe"` on Windows.  
-- `"BWAutofillerLinuxGUI"` on Linux.  
-
-The full filepaths will be needed, if you are in the terminal and not at the script directory.  
-eg. `"/home/user/Apps/Autofiller/BWAutofillerLinuxCLI" -h` this is just an example of course.  
-You need to enter your path of the autofiller.
-
-### Cli Examples
-
-To start the script in daemon mode with a certfile and with a custom additional communication password:
-```bash
-python bitwardenautofiller.py -d -cf /path/to/cert/file.cer -e ComplexPassword
-```
-The same communication password would also need to be set for the client.
-
-To start the script in client mode with the sync command and a additional custom communication password (daemon needs to run):
-```bash
-python bitwardenautofiller.py -c -e ComplexPassword
+```sh
+uv sync --extra gui --extra desktop
+uv run bwautofillergui
 ```
 
-To use a custom Installation path of Bitwarden you would use:
-```bash
-python bitwardenautofiller.py -bw /path/to/bw
-```
-In here there is no info on daemon or clientmode.  
-In this case daemon will be used if it isn't running, otherwise the client will run.
+Run a one-shot fill from a terminal:
 
-To start the script in client mode (daemon must already be running) with a custom fill action sequence:
-```bash
-python bitwardenautofiller.py -c -f C14724635
-```
-On Linux add `sleep 1; ` in front to wait 1 second before checking for the active app.  
-On PowerShell Windows add `Start-Sleep -Seconds 1; ` in front for the same behavior.  
-This will fill in the login information (username, password, and copy the TOTP code),  
-and it will hit tab after the username and enter after the password.
-
-The daemon can be closed with the client by sending:
-```bash
-python bitwardenautofiller.py -c -x
+```sh
+uv run bitwarden-autofiller --app-id steam
 ```
 
-If you use a binary you just replace `python bitwardenautofiller.py` with the path to your binary.
+The CLI prompts for a master password without echoing it. You can provide the
+account email with `--email`; passwords are deliberately not accepted as
+command-line options. The default three-second focus delay gives you time to
+switch to the target application. Set `--delay 0` to disable it or choose a
+different delay. Use `--help` for all options.
 
-### Network usage
-If you want, you can use the daemon on a other pc of your network.  
-For that you want to fist setup a SMB share or something like it.  
-You want to do this on the pc that runs the the daemon.  
-This pc will never have to type anything, as the client will do that.  
-So you can have this on a server without a GUI.  
-You want to share the "/tmp/Bitwarden+Cli-Autofiller+Script-Directory" folder.
+In the GUI, enter the same application ID, connect to the vault, then click
+**Fill now** and switch to the target application during the countdown. The
+master password field is masked, cleared immediately after connecting, and is
+never saved in settings.
 
-Next go to the client pc (the one where you like to autofill).  
-There mount the share to "/tmp/Bitwarden+Cli-Autofiller+Script-Directory".  
-By doing this (or a variation of this) the salt files are now the same on both PCs.
+## Map a vault entry
 
-Next on the server run:
-```bash
-python bitwardenautofiller.py -n -d -sf -t -1 -cf CERTFILE -s SERVERURL  -p PASSWORD -m MAIL 
+Add a URI to each Bitwarden login item using this format:
+
+```text
+pcprocess://<application-id>
 ```
-Not all of this is needed but lets break it down:
-- `-n`: disables all inputs, for a server this is useful. 
-- `-d`: runs daemonmode.
-- `-sf`: enables the saltfile subfolder "/Bitwarden+Cli-Autofiller+Script-Directory".
-- `-t` `-1`: disables timeout, also useful on a server.
-- `-cf` `CERTFILE`: set the certfile (only needed for self-signed Bitwarden).
-- `-s` `SERVERURL`: set the server URL (if you use your own server, only needs to be set once).
-- `-p` `PASSWORD`: set the vault password.
-- `-m` `MAIL`: set the vault mail.
 
-Replace uppercase words with the correct info for you.
+For example, map a Steam login to `pcprocess://steam`, then enter `steam` as the
+application ID in the GUI or CLI. Matching is case-insensitive. Wayland does
+not expose a global foreground process ID through a standard API, so the app ID
+must be entered explicitly; the application does not try to bypass that privacy
+boundary.
 
-On the client run:
-```bash
-python bitwardenautofiller.py -c -sf -ip LOCALIP -lp LOCALPORT
+## Fill actions
+
+The default sequence is `C14724635`:
+
+| Code | Action |
+| --- | --- |
+| `1` | Select username |
+| `2` | Select password |
+| `3` | Fetch and select the current TOTP code |
+| `4` | Type the selected value |
+| `5` | Copy the selected value to the clipboard |
+| `6` | Press Enter |
+| `7` | Press Tab |
+| `A` / `B` | Select the next / previous matching login |
+| `C` / `D` | Select the first / last matching login |
+
+For example, `C14724635` selects the first match, types the username, tabs,
+types the password, presses Enter, then copies a freshly requested TOTP code.
+Configure a different sequence with `--actions` or in the GUI. An account
+navigation code separates action groups; following actions apply to the
+selected match.
+
+## Optional daemon mode
+
+The authenticated daemon keeps a Bitwarden session on one host and accepts
+client fill requests. It binds to loopback by default and stores its random
+authentication token in an owner-only file under the user configuration
+directory:
+
+```sh
+uv run bitwarden-autofiller-daemon start --email you@example.com
 ```
-This will then autofill the active app.  
-Add `sleep 1; ` in front to wait 1 second before cheking for the active app.  
-On PowerShell Windows add `Start-Sleep -Seconds 1; ` in front for the same behavior.  
-Let's also break down the command:
-- `-c`: runs clientmode.
-- `-sf`: enables the saltfile subfolder "/Bitwarden+Cli-Autofiller+Script-Directory".
-- `-ip` `LOCALIP`: set the daemon IP.
-- `-lp` `LOCALPORT`: set the daemon port.
 
-Replace uppercase words with the correct info for you.
+Stop it locally with:
 
-## Contributing
+```sh
+uv run bitwarden-autofiller-daemon stop
+```
 
-Contributions are welcome! If you'd like to contribute, please fork the repository and submit a pull request.  
-Please do so on the [main repo on codeberg.org](https://codeberg.org/marvin1099/BitwardenAutofiller) if possible.
+To bind on a network interface, TLS is mandatory:
+
+```sh
+uv run bitwarden-autofiller-daemon start \
+  --host 0.0.0.0 --port 64756 \
+  --tls-certificate server-cert.pem --tls-private-key server-key.pem
+```
+
+The client must have a securely provisioned copy of the daemon token file and
+trust the server certificate/CA:
+
+```sh
+uv run bitwarden-autofiller --app-id steam \
+  --daemon-host autofill.example.net --daemon-port 64756 \
+  --token-file ./daemon.token --ca-certificate server-cert.pem
+```
+
+Do not put the token or a master password in shell arguments, shared folders,
+or source control. The token file must remain owner-only. The daemon protocol
+uses bounded, authenticated messages; all non-loopback connections require
+TLS.
+
+## Security and privacy
+
+- Master passwords and Bitwarden session keys are passed to `bw` through
+  environment variables, never process arguments.
+- The CLI error adapter does not echo raw subprocess output.
+- Listing a vault produces summary objects only. A full login is fetched only
+  when the selected action will emit its password; TOTP is fetched only when
+  requested. The full vault is not cached.
+- The local daemon uses a random owner-only token and constant-time token
+  comparison. Remote daemon binds require TLS.
+- Wayland input uses the XDG Remote Desktop portal via `eitype`; the compositor
+  can ask the user to grant permission. If that backend is unavailable, the
+  application fails closed rather than silently falling back to X11 input.
+- Autofill necessarily places selected credential strings in process memory
+  and sends them to the focused application. This is not an OS-level sandbox
+  against a process running as the same user.
+
+## Development
+
+```sh
+uv sync --all-groups --extra gui
+uv run pytest --cov
+uv run ruff check .
+uv run ruff format --check .
+uv run mypy src tests
+uv build
+```
+
+Install platform extras when exercising the corresponding input backend:
+
+```sh
+uv sync --all-groups --extra gui --extra desktop --extra wayland
+```
+
+Tests use fake Bitwarden CLI responses and local sockets; they do not need vault
+credentials. GUI tests run with Qt's offscreen platform. The GUI is also
+manually smoke-tested in a private KDE session.
+
+## License
+
+AGPL-3.0-or-later. See [LICENSE](LICENSE).

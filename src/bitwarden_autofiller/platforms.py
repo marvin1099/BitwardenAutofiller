@@ -5,8 +5,12 @@ from __future__ import annotations
 import os
 import sys
 from collections.abc import Callable
+from ctypes import CDLL, RTLD_GLOBAL
+from ctypes.util import find_library
 from importlib import import_module
 from typing import Any
+
+from bitwarden_autofiller.execution import InputAdapter
 
 
 class InputBackendError(RuntimeError):
@@ -20,9 +24,28 @@ class WaylandInputAdapter:
         try:
             eitype = import_module("eitype")
         except ImportError as error:
-            raise InputBackendError(
-                "Wayland input requires the optional 'wayland' extra (eitype)"
-            ) from error
+            if isinstance(error, ModuleNotFoundError) and error.name == "eitype":
+                raise InputBackendError(
+                    "Wayland input requires the optional 'wayland' extra (eitype)"
+                ) from error
+            # Some eitype manylinux wheels bundle libxkbcommon without making
+            # it globally visible, although the extension expects its symbols
+            # from the process namespace. Loading the system ABI globally first
+            # lets the extension resolve that dependency without changing the
+            # user's library installation.
+            xkbcommon = find_library("xkbcommon")
+            if xkbcommon:
+                try:
+                    CDLL(xkbcommon, mode=RTLD_GLOBAL)
+                    eitype = import_module("eitype")
+                except (ImportError, OSError) as retry_error:
+                    raise InputBackendError(
+                        "Wayland input could not load eitype with system libxkbcommon"
+                    ) from retry_error
+            else:
+                raise InputBackendError(
+                    "Wayland input requires the optional 'wayland' extra (eitype)"
+                ) from error
 
         try:
             self._typer = eitype.EiType.connect_portal()
@@ -81,6 +104,34 @@ class PyAutoGuiInputAdapter:
 
     def copy_text(self, text: str) -> None:
         self._clipboard_copy(text)
+
+
+class LazyInputAdapter:
+    """Defer desktop permissions and imports until input is actually needed."""
+
+    def __init__(self, factory: Callable[[], InputAdapter]) -> None:
+        self._factory = factory
+        self._adapter: InputAdapter | None = None
+
+    def _get_adapter(self) -> InputAdapter:
+        if self._adapter is None:
+            self._adapter = self._factory()
+        return self._adapter
+
+    def type_text(self, text: str) -> None:
+        self._get_adapter().type_text(text)
+
+    def press_key(self, key: str) -> None:
+        self._get_adapter().press_key(key)
+
+    def copy_text(self, text: str) -> None:
+        self._get_adapter().copy_text(text)
+
+    def close(self) -> None:
+        if self._adapter is not None:
+            close = getattr(self._adapter, "close", None)
+            if callable(close):
+                close()
 
 
 def create_input_adapter(

@@ -40,9 +40,14 @@ def load_or_create_auth_token(path: Path) -> str:
     return token
 
 
+def read_auth_token(path: Path) -> str:
+    """Read a pre-existing, owner-only daemon token without creating one."""
+    return _read_existing_token(Path(path))
+
+
 def _read_existing_token(path: Path) -> str:
     try:
-        metadata = path.stat()
+        metadata = path.lstat()
         if not stat.S_ISREG(metadata.st_mode):
             raise CredentialFileError("Daemon token path must be a regular file")
         if os.name != "nt" and stat.S_IMODE(metadata.st_mode) & 0o077:

@@ -19,7 +19,10 @@ def resolve_app_id(explicit_app_id: str | None = None) -> str:
     of attempting to bypass the compositor's privacy boundary.
     """
     if explicit_app_id and explicit_app_id.strip():
-        return explicit_app_id.strip().removeprefix("pcprocess://").rstrip("/")
+        value = explicit_app_id.strip()
+        if value.casefold().startswith("pcprocess://"):
+            value = value[len("pcprocess://") :]
+        return value.rstrip("/")
 
     is_wayland = sys.platform == "linux" and (
         bool(os.environ.get("WAYLAND_DISPLAY"))

@@ -31,6 +31,7 @@ def test_login_uses_passwordenv_not_a_password_argument(
 ) -> None:
     command, log_path, _ = fake_bw
     monkeypatch.setenv("BW_TEST_LOG", str(log_path))
+    monkeypatch.setenv("BW_SESSION", "parent-session-must-not-be-used")
     client = BitwardenCLI(command)
 
     assert client.login("user@example.test", "correct horse battery staple") == (
@@ -39,6 +40,7 @@ def test_login_uses_passwordenv_not_a_password_argument(
     recorded = json.loads(log_path.read_text(encoding="utf-8"))
     assert "correct horse battery staple" not in recorded["argv"]
     assert recorded["password"] == "correct horse battery staple"
+    assert recorded["session"] is None
     assert "--passwordenv" in recorded["argv"]
 
 
@@ -47,11 +49,13 @@ def test_session_key_is_passed_through_environment(
 ) -> None:
     command, log_path, _ = fake_bw
     monkeypatch.setenv("BW_TEST_LOG", str(log_path))
+    monkeypatch.setenv("BW_AUTOFILLER_MASTER_PASSWORD", "parent-secret-must-not-leak")
     client = BitwardenCLI(command)
 
     client.command(["list", "items"], session_key="session-never-in-argv")
     recorded = json.loads(log_path.read_text(encoding="utf-8"))
     assert recorded["session"] == "session-never-in-argv"
+    assert recorded["password"] is None
     assert "session-never-in-argv" not in recorded["argv"]
 
 
