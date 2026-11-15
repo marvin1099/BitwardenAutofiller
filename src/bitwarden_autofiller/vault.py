@@ -48,8 +48,7 @@ def summaries_from_response(response: Any) -> tuple[LoginSummary, ...]:
     """Convert a Bitwarden CLI list response without retaining password fields."""
     payload = response
     if isinstance(payload, dict) and payload.get("success") is False:
-        message = payload.get("message") or payload.get("error") or "Unknown CLI error"
-        raise ValueError(f"Bitwarden CLI failed to list items: {message}")
+        raise ValueError("Bitwarden CLI failed to list items")
 
     while isinstance(payload, dict) and "data" in payload:
         payload = payload["data"]
@@ -87,8 +86,7 @@ def credentials_from_response(response: Any) -> LoginCredentials:
     """Convert a single Bitwarden item response to one credential record."""
     payload = response
     if isinstance(payload, dict) and payload.get("success") is False:
-        message = payload.get("message") or payload.get("error") or "Unknown CLI error"
-        raise ValueError(f"Bitwarden CLI failed to read item: {message}")
+        raise ValueError("Bitwarden CLI failed to read item")
     while isinstance(payload, dict) and "data" in payload:
         payload = payload["data"]
     if not isinstance(payload, dict):

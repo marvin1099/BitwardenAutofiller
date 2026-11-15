@@ -1,0 +1,104 @@
+from typing import Any
+
+import pytest
+
+from bitwarden_autofiller.service import ItemNotMatchedError, VaultService
+from bitwarden_autofiller.vault import LoginCredentials, LoginSummary
+
+
+class FakeBitwardenCLI:
+    def __init__(self) -> None:
+        self.calls: list[tuple[list[str], str]] = []
+        self.items = [
+            {
+                "id": "steam-login",
+                "type": 1,
+                "name": "Steam personal",
+                "login": {
+                    "username": "alice",
+                    "password": "do-not-cache-all-items",
+                    "uris": [{"uri": "pcprocess://steam"}],
+                },
+            },
+            {
+                "id": "mail-login",
+                "type": 1,
+                "name": "Mail",
+                "login": {
+                    "username": "alice@example.test",
+                    "password": "unrelated-secret",
+                    "uris": [{"uri": "pcprocess://mail"}],
+                },
+            },
+        ]
+
+    def command(self, arguments: list[str], *, session_key: str) -> dict[str, Any]:
+        self.calls.append((arguments, session_key))
+        if arguments == ["list", "items"]:
+            return {"success": True, "data": {"data": self.items}}
+        if arguments == ["get", "item", "steam-login"]:
+            return {
+                "success": True,
+                "data": {
+                    "data": {
+                        "id": "steam-login",
+                        "login": {"username": "alice", "password": "selected-only"},
+                    }
+                },
+            }
+        if arguments == ["get", "totp", "steam-login"]:
+            return {"success": True, "data": {"data": "123456"}}
+        if arguments == ["sync"]:
+            return {"success": True}
+        raise AssertionError(f"Unexpected CLI call: {arguments!r}")
+
+
+def test_listing_logins_keeps_only_safe_summaries() -> None:
+    cli = FakeBitwardenCLI()
+    service = VaultService(cli, "session-key-for-tests")
+
+    assert service.list_matches("steam") == (
+        LoginSummary("steam-login", "Steam personal", "alice", ("pcprocess://steam",)),
+    )
+    assert "unrelated-secret" not in repr(service.list_matches("steam"))
+
+
+def test_service_fetches_only_the_selected_matching_login() -> None:
+    cli = FakeBitwardenCLI()
+    service = VaultService(cli, "session-key-for-tests")
+
+    credentials = service.get_login("steam", "steam-login")
+
+    assert credentials == LoginCredentials(
+        "steam-login", username="alice", password="selected-only"
+    )
+    assert [call[0] for call in cli.calls].count(["get", "item", "steam-login"]) == 1
+    assert all(session == "session-key-for-tests" for _, session in cli.calls)
+
+
+def test_service_refuses_to_fetch_an_item_mapped_to_another_app() -> None:
+    cli = FakeBitwardenCLI()
+    service = VaultService(cli, "session-key-for-tests")
+
+    with pytest.raises(ItemNotMatchedError):
+        service.get_login("steam", "mail-login")
+
+    assert not any(arguments[:2] == ["get", "item"] for arguments, _ in cli.calls)
+
+
+def test_totp_is_retrieved_only_when_requested() -> None:
+    cli = FakeBitwardenCLI()
+    service = VaultService(cli, "session-key-for-tests")
+
+    assert service.get_totp("steam", "steam-login") == "123456"
+
+    assert [call[0] for call in cli.calls].count(["get", "totp", "steam-login"]) == 1
+
+
+def test_close_clears_the_held_session_key() -> None:
+    service = VaultService(FakeBitwardenCLI(), "session-key-for-tests")
+
+    service.close()
+
+    with pytest.raises(RuntimeError, match="closed"):
+        service.list_matches("steam")
