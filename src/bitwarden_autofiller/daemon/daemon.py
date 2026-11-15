@@ -14,7 +14,7 @@ from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any
 
-from bitwarden_autofiller.transport import ProtocolError, receive_json, send_json
+from bitwarden_autofiller.daemon.transport import ProtocolError, receive_json, send_json
 
 PROTOCOL_VERSION = 1
 SUPPORTED_COMMANDS = frozenset({"list_matches", "get_login", "get_totp", "sync"})

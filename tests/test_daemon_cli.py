@@ -3,7 +3,7 @@ from typing import Any
 
 import pytest
 
-from bitwarden_autofiller import daemon_cli
+from bitwarden_autofiller.daemon import cli as daemon_cli
 
 
 class FakeService:

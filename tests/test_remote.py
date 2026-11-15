@@ -2,9 +2,9 @@ from typing import Any
 
 import pytest
 
-from bitwarden_autofiller.daemon import DaemonRequestError
-from bitwarden_autofiller.remote import RemoteVaultService
-from bitwarden_autofiller.vault import LoginCredentials, LoginSummary
+from bitwarden_autofiller.daemon.daemon import DaemonRequestError
+from bitwarden_autofiller.daemon.remote import RemoteVaultService
+from bitwarden_autofiller.vault.items import LoginCredentials, LoginSummary
 
 
 class FakeDaemonClient:

@@ -3,12 +3,12 @@ from collections.abc import Sequence
 import pytest
 
 from bitwarden_autofiller import cli
-from bitwarden_autofiller.actions import Action
-from bitwarden_autofiller.bitwarden import BitwardenCLIError
-from bitwarden_autofiller.execution import InputAdapter
-from bitwarden_autofiller.platforms import InputBackendError
-from bitwarden_autofiller.vault import LoginSummary
-from bitwarden_autofiller.workflow import FillResult
+from bitwarden_autofiller.desktop.platforms import InputBackendError
+from bitwarden_autofiller.filling.actions import Action
+from bitwarden_autofiller.filling.execution import InputAdapter
+from bitwarden_autofiller.filling.workflow import FillResult
+from bitwarden_autofiller.vault.bitwarden import BitwardenCLIError
+from bitwarden_autofiller.vault.items import LoginSummary
 
 
 class FakeService:

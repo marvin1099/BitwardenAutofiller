@@ -9,14 +9,18 @@ from pathlib import Path
 
 from platformdirs import user_config_path
 
-from bitwarden_autofiller.authentication import authenticate_vault
-from bitwarden_autofiller.bitwarden import BitwardenCLI, BitwardenCLIError
-from bitwarden_autofiller.daemon import AutofillDaemon, DaemonClient, DaemonRequestError
-from bitwarden_autofiller.security import (
+from bitwarden_autofiller.daemon.daemon import (
+    AutofillDaemon,
+    DaemonClient,
+    DaemonRequestError,
+)
+from bitwarden_autofiller.daemon.security import (
     CredentialFileError,
     load_or_create_auth_token,
     read_auth_token,
 )
+from bitwarden_autofiller.vault.authentication import authenticate_vault
+from bitwarden_autofiller.vault.bitwarden import BitwardenCLI, BitwardenCLIError
 
 
 def default_token_path() -> Path:

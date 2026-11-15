@@ -2,7 +2,7 @@ import socket
 
 import pytest
 
-from bitwarden_autofiller.transport import (
+from bitwarden_autofiller.daemon.transport import (
     ProtocolError,
     receive_json,
     send_json,

@@ -1,6 +1,6 @@
 import pytest
 
-from bitwarden_autofiller.daemon import (
+from bitwarden_autofiller.daemon.daemon import (
     AutofillDaemon,
     DaemonClient,
     DaemonRequestError,

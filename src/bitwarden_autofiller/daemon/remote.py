@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
-from bitwarden_autofiller.daemon import DaemonClient, DaemonRequestError
-from bitwarden_autofiller.vault import LoginCredentials, LoginSummary
+from bitwarden_autofiller.daemon.daemon import DaemonClient, DaemonRequestError
+from bitwarden_autofiller.vault.items import LoginCredentials, LoginSummary
 
 
 class RequestClient(Protocol):

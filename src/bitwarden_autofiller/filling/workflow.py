@@ -6,9 +6,9 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
-from bitwarden_autofiller.actions import Action, group_account_actions
-from bitwarden_autofiller.execution import InputAdapter, execute_fill_actions
-from bitwarden_autofiller.vault import (
+from bitwarden_autofiller.filling.actions import Action, group_account_actions
+from bitwarden_autofiller.filling.execution import InputAdapter, execute_fill_actions
+from bitwarden_autofiller.vault.items import (
     LoginCredentials,
     LoginSummary,
 )

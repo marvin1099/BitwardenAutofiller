@@ -2,11 +2,11 @@ from typing import Any
 
 import pytest
 
-from bitwarden_autofiller.authentication import (
+from bitwarden_autofiller.vault.authentication import (
     AuthenticationError,
     authenticate_vault,
 )
-from bitwarden_autofiller.service import VaultService
+from bitwarden_autofiller.vault.service import VaultService
 
 
 class FakeBitwardenCLI:

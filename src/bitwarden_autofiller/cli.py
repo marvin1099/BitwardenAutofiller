@@ -10,26 +10,26 @@ from pathlib import Path
 from typing import Protocol
 
 from bitwarden_autofiller import __version__
-from bitwarden_autofiller.actions import parse_action_sequence
-from bitwarden_autofiller.app_identity import (
+from bitwarden_autofiller.daemon.cli import default_token_path
+from bitwarden_autofiller.daemon.daemon import DaemonClient, DaemonRequestError
+from bitwarden_autofiller.daemon.remote import RemoteVaultService
+from bitwarden_autofiller.daemon.security import CredentialFileError, read_auth_token
+from bitwarden_autofiller.desktop.app_identity import (
     ActiveApplicationUnavailable,
     resolve_app_id,
 )
-from bitwarden_autofiller.authentication import (
-    AuthenticationError,
-    authenticate_vault,
-)
-from bitwarden_autofiller.bitwarden import BitwardenCLI, BitwardenCLIError
-from bitwarden_autofiller.daemon import DaemonClient, DaemonRequestError
-from bitwarden_autofiller.daemon_cli import default_token_path
-from bitwarden_autofiller.platforms import (
+from bitwarden_autofiller.desktop.platforms import (
     InputBackendError,
     LazyInputAdapter,
     create_input_adapter,
 )
-from bitwarden_autofiller.remote import RemoteVaultService
-from bitwarden_autofiller.security import CredentialFileError, read_auth_token
-from bitwarden_autofiller.workflow import FillService, fill_for_app
+from bitwarden_autofiller.filling.actions import parse_action_sequence
+from bitwarden_autofiller.filling.workflow import FillService, fill_for_app
+from bitwarden_autofiller.vault.authentication import (
+    AuthenticationError,
+    authenticate_vault,
+)
+from bitwarden_autofiller.vault.bitwarden import BitwardenCLI, BitwardenCLIError
 
 
 class CLIService(FillService, Protocol):

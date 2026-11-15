@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
-from bitwarden_autofiller.vault import (
+from bitwarden_autofiller.vault.items import (
     LoginCredentials,
     LoginSummary,
     credentials_from_response,

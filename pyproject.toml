@@ -25,8 +25,8 @@ wayland = ["eitype>=0.2.2,<0.3"]
 
 [project.scripts]
 bitwarden-autofiller = "bitwarden_autofiller.cli:main"
-bwautofillergui = "bitwarden_autofiller.gui:main"
-bitwarden-autofiller-daemon = "bitwarden_autofiller.daemon_cli:main"
+bwautofillergui = "bitwarden_autofiller.desktop.gui:main"
+bitwarden-autofiller-daemon = "bitwarden_autofiller.daemon.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/bitwarden_autofiller"]
@@ -50,7 +50,7 @@ pythonpath = ["src"]
 [tool.coverage.run]
 branch = true
 source = ["bitwarden_autofiller"]
-omit = ["*/bitwarden_autofiller/gui.py"]
+omit = ["*/bitwarden_autofiller/desktop/gui.py"]
 
 [tool.coverage.report]
 show_missing = true

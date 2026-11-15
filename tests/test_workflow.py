@@ -1,6 +1,6 @@
-from bitwarden_autofiller.actions import parse_action_sequence
-from bitwarden_autofiller.vault import LoginCredentials, LoginSummary
-from bitwarden_autofiller.workflow import fill_for_app
+from bitwarden_autofiller.filling.actions import parse_action_sequence
+from bitwarden_autofiller.filling.workflow import fill_for_app
+from bitwarden_autofiller.vault.items import LoginCredentials, LoginSummary
 
 
 class FakeService:

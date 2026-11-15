@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from bitwarden_autofiller.security import (
+from bitwarden_autofiller.daemon.security import (
     CredentialFileError,
     load_or_create_auth_token,
     read_auth_token,

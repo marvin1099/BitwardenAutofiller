@@ -1,4 +1,4 @@
-from bitwarden_autofiller.actions import (
+from bitwarden_autofiller.filling.actions import (
     Action,
     group_account_actions,
     parse_action_sequence,

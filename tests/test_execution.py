@@ -1,8 +1,8 @@
 from collections.abc import Sequence
 
-from bitwarden_autofiller.actions import Action, parse_action_sequence
-from bitwarden_autofiller.execution import execute_fill_actions
-from bitwarden_autofiller.vault import LoginCredentials
+from bitwarden_autofiller.filling.actions import Action, parse_action_sequence
+from bitwarden_autofiller.filling.execution import execute_fill_actions
+from bitwarden_autofiller.vault.items import LoginCredentials
 
 
 class RecordingInput:

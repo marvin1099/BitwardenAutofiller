@@ -4,12 +4,12 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
-from bitwarden_autofiller import platforms
-from bitwarden_autofiller.app_identity import (
+from bitwarden_autofiller.desktop import platforms
+from bitwarden_autofiller.desktop.app_identity import (
     ActiveApplicationUnavailable,
     resolve_app_id,
 )
-from bitwarden_autofiller.platforms import (
+from bitwarden_autofiller.desktop.platforms import (
     InputBackendError,
     LazyInputAdapter,
     PyAutoGuiInputAdapter,
@@ -37,7 +37,7 @@ def test_wayland_factory_uses_eitype_and_clipboard_injection(
     eitype.EiType = SimpleNamespace(connect_portal=lambda: typer)  # type: ignore[attr-defined]
     copied: list[str] = []
     monkeypatch.setitem(sys.modules, "eitype", eitype)
-    monkeypatch.setattr("bitwarden_autofiller.platforms.sys.platform", "linux")
+    monkeypatch.setattr("bitwarden_autofiller.desktop.platforms.sys.platform", "linux")
     monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
     monkeypatch.delenv("DISPLAY", raising=False)
 
@@ -58,7 +58,7 @@ def test_wayland_does_not_silently_fall_back_to_x11(
         raise InputBackendError("Wayland portal is unavailable")
 
     monkeypatch.setattr(platforms.WaylandInputAdapter, "__init__", unavailable)
-    monkeypatch.setattr("bitwarden_autofiller.platforms.sys.platform", "linux")
+    monkeypatch.setattr("bitwarden_autofiller.desktop.platforms.sys.platform", "linux")
     monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
     monkeypatch.setenv("DISPLAY", ":0")
 
@@ -69,7 +69,9 @@ def test_wayland_does_not_silently_fall_back_to_x11(
 def test_wayland_requires_explicit_app_identity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("bitwarden_autofiller.app_identity.sys.platform", "linux")
+    monkeypatch.setattr(
+        "bitwarden_autofiller.desktop.app_identity.sys.platform", "linux"
+    )
     monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
     monkeypatch.delenv("XDG_SESSION_TYPE", raising=False)
 
@@ -94,12 +96,15 @@ def test_eitype_loader_uses_system_xkbcommon_for_wheel_symbol_resolution(
         return eitype
 
     loaded: list[tuple[str, int]] = []
-    monkeypatch.setattr("bitwarden_autofiller.platforms.import_module", import_eitype)
     monkeypatch.setattr(
-        "bitwarden_autofiller.platforms.find_library", lambda _: "libxkbcommon.so.0"
+        "bitwarden_autofiller.desktop.platforms.import_module", import_eitype
     )
     monkeypatch.setattr(
-        "bitwarden_autofiller.platforms.CDLL",
+        "bitwarden_autofiller.desktop.platforms.find_library",
+        lambda _: "libxkbcommon.so.0",
+    )
+    monkeypatch.setattr(
+        "bitwarden_autofiller.desktop.platforms.CDLL",
         lambda name, mode: loaded.append((name, mode)),
     )
 
@@ -119,7 +124,7 @@ def test_pyautogui_backend_maps_keys_and_uses_clipboard_callback(
         press=lambda key: events.append(("press", key)),
     )
     monkeypatch.setattr(
-        "bitwarden_autofiller.platforms.import_module", lambda _: fake_pyautogui
+        "bitwarden_autofiller.desktop.platforms.import_module", lambda _: fake_pyautogui
     )
     copied: list[str] = []
     adapter = PyAutoGuiInputAdapter(clipboard_copy=copied.append)
@@ -176,11 +181,13 @@ def test_app_identity_uses_active_window_on_x11(
 ) -> None:
     window = SimpleNamespace(getAppName=lambda: "Steam")
     pywinctl = SimpleNamespace(getActiveWindow=lambda: window)
-    monkeypatch.setattr("bitwarden_autofiller.app_identity.sys.platform", "linux")
+    monkeypatch.setattr(
+        "bitwarden_autofiller.desktop.app_identity.sys.platform", "linux"
+    )
     monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
     monkeypatch.setenv("XDG_SESSION_TYPE", "x11")
     monkeypatch.setattr(
-        "bitwarden_autofiller.app_identity.import_module", lambda _: pywinctl
+        "bitwarden_autofiller.desktop.app_identity.import_module", lambda _: pywinctl
     )
 
     assert resolve_app_id() == "Steam"

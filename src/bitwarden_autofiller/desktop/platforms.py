@@ -10,7 +10,7 @@ from ctypes.util import find_library
 from importlib import import_module
 from typing import Any
 
-from bitwarden_autofiller.execution import InputAdapter
+from bitwarden_autofiller.filling.execution import InputAdapter
 
 
 class InputBackendError(RuntimeError):

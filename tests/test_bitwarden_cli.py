@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from bitwarden_autofiller.bitwarden import BitwardenCLI, BitwardenCLIError
+from bitwarden_autofiller.vault.bitwarden import BitwardenCLI, BitwardenCLIError
 
 
 @pytest.fixture

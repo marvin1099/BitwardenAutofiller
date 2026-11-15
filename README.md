@@ -140,6 +140,15 @@ TLS.
 
 ## Development
 
+The `src/bitwarden_autofiller` package is organized by responsibility:
+
+- `vault/` contains Bitwarden CLI access, vault item parsing, authentication,
+  and on-demand vault services.
+- `filling/` contains app matching, fill actions, and workflow orchestration.
+- `daemon/` contains the authenticated client/server protocol and token handling.
+- `desktop/` contains the GUI and desktop-specific app/input adapters.
+- `cli.py` is the one-shot command-line entry point.
+
 ```sh
 uv sync --all-groups --extra gui
 uv run pytest --cov

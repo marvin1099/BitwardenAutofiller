@@ -23,20 +23,20 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from bitwarden_autofiller.actions import Action, parse_action_sequence
-from bitwarden_autofiller.app_identity import resolve_app_id
-from bitwarden_autofiller.authentication import (
-    AuthenticationError,
-    authenticate_vault,
-)
-from bitwarden_autofiller.bitwarden import BitwardenCLI, BitwardenCLIError
-from bitwarden_autofiller.platforms import (
+from bitwarden_autofiller.desktop.app_identity import resolve_app_id
+from bitwarden_autofiller.desktop.platforms import (
     InputBackendError,
     LazyInputAdapter,
     create_input_adapter,
 )
-from bitwarden_autofiller.service import VaultService
-from bitwarden_autofiller.workflow import FillResult, fill_for_app
+from bitwarden_autofiller.filling.actions import Action, parse_action_sequence
+from bitwarden_autofiller.filling.workflow import FillResult, fill_for_app
+from bitwarden_autofiller.vault.authentication import (
+    AuthenticationError,
+    authenticate_vault,
+)
+from bitwarden_autofiller.vault.bitwarden import BitwardenCLI, BitwardenCLIError
+from bitwarden_autofiller.vault.service import VaultService
 
 
 class _OperationWorker(QObject):

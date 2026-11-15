@@ -7,8 +7,8 @@ import os
 from collections.abc import Callable
 from typing import Any, Protocol
 
-from bitwarden_autofiller.bitwarden import BitwardenCLIError
-from bitwarden_autofiller.service import BitwardenCommandClient, VaultService
+from bitwarden_autofiller.vault.bitwarden import BitwardenCLIError
+from bitwarden_autofiller.vault.service import BitwardenCommandClient, VaultService
 
 
 class AuthenticationClient(BitwardenCommandClient, Protocol):

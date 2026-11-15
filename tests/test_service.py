@@ -2,8 +2,8 @@ from typing import Any
 
 import pytest
 
-from bitwarden_autofiller.service import ItemNotMatchedError, VaultService
-from bitwarden_autofiller.vault import LoginCredentials, LoginSummary
+from bitwarden_autofiller.vault.items import LoginCredentials, LoginSummary
+from bitwarden_autofiller.vault.service import ItemNotMatchedError, VaultService
 
 
 class FakeBitwardenCLI:

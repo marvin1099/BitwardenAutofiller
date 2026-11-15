@@ -10,7 +10,7 @@ pytest.importorskip("PySide6")
 from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QApplication, QLineEdit
 
-from bitwarden_autofiller.gui import BitwardenAutofillerWindow
+from bitwarden_autofiller.desktop.gui import BitwardenAutofillerWindow
 
 
 def test_gui_builds_without_connecting_to_a_real_vault(tmp_path: Path) -> None:

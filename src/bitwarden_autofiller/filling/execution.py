@@ -5,8 +5,8 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from typing import Protocol
 
-from bitwarden_autofiller.actions import Action
-from bitwarden_autofiller.vault import LoginCredentials
+from bitwarden_autofiller.filling.actions import Action
+from bitwarden_autofiller.vault.items import LoginCredentials
 
 
 class InputAdapter(Protocol):

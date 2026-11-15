@@ -1,4 +1,4 @@
-from bitwarden_autofiller.vault import (
+from bitwarden_autofiller.vault.items import (
     LoginSummary,
     credentials_from_response,
     matching_logins,
