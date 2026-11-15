@@ -1,0 +1,29 @@
+manifest_version: 1
+project:
+  id: bitwarden-autofiller
+  summary: Fill desktop application logins from a Bitwarden vault.
+  source_of_truth: pyproject.toml
+  python: ">=3.12"
+
+desktop:
+  wayland:
+    input: xdg-desktop-portal-remote-desktop
+    implementation: eitype
+    requires_user_consent: true
+    active_application_detection: compositor-adapter-or-explicit-app-id
+  x11:
+    input: pyautogui
+  windows:
+    input: pyautogui
+
+security:
+  default_daemon_bind: 127.0.0.1
+  remote_transport: tls-required
+  secrets_in_process_arguments: forbidden
+  full_vault_cache: forbidden
+
+development:
+  environment: uv
+  tests: uv run pytest --cov
+  lint: uv run ruff check .
+  format_check: uv run ruff format --check .

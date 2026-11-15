@@ -1,0 +1,73 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "bitwarden-autofiller"
+version = "0.6.0"
+description = "Securely autofill Bitwarden logins into desktop applications"
+readme = "README.md"
+license = "AGPL-3.0-or-later"
+requires-python = ">=3.12"
+authors = [{ name = "marvin1099" }]
+dependencies = [
+  "cryptography>=44.0",
+  "platformdirs>=4.3",
+  "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+desktop = [
+  "pyautogui>=0.9.54",
+  "pyperclip>=1.9",
+  "pywinctl>=0.4.1",
+]
+gui = ["PySide6>=6.8"]
+wayland = ["eitype>=0.2.2,<0.3"]
+
+[project.scripts]
+bitwarden-autofiller = "bitwarden_autofiller.cli:main"
+bwautofillergui = "bitwarden_autofiller.gui:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/bitwarden_autofiller"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"project.yaml" = "bitwarden_autofiller/project.yaml"
+
+[dependency-groups]
+dev = [
+  "mypy>=1.13",
+  "pytest>=8.3",
+  "pytest-cov>=6.0",
+  "ruff>=0.9",
+]
+
+[tool.pytest.ini_options]
+addopts = "--strict-config --strict-markers"
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.coverage.run]
+branch = true
+source = ["bitwarden_autofiller"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+fail_under = 80
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.12"
+mypy_path = "src"
+strict = true
+warn_unused_ignores = true
+no_implicit_optional = true
