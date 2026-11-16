@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 from collections.abc import Sequence
@@ -10,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 PASSWORD_ENVIRONMENT_VARIABLE = "BW_AUTOFILLER_MASTER_PASSWORD"
+_LOGGER = logging.getLogger(__name__)
 
 
 class BitwardenCLIError(RuntimeError):
@@ -81,6 +83,8 @@ class BitwardenCLI:
         clear_session: bool = False,
     ) -> dict[str, Any]:
         argv = [*self.executable, *arguments]
+        operation = _safe_operation(arguments)
+        _LOGGER.debug("Executing Bitwarden CLI operation %s", operation)
         if "--response" not in argv:
             argv.append("--response")
 
@@ -107,27 +111,38 @@ class BitwardenCLI:
                 env=environment,
             )
         except FileNotFoundError as error:
+            _LOGGER.error("Bitwarden CLI executable was not found")
             raise BitwardenCLIError("Bitwarden CLI executable was not found") from error
         except subprocess.TimeoutExpired as error:
+            _LOGGER.warning("Bitwarden CLI operation %s timed out", operation)
             raise BitwardenCLIError("Bitwarden CLI command timed out") from error
         finally:
             environment.pop(PASSWORD_ENVIRONMENT_VARIABLE, None)
             environment.pop("BW_SESSION", None)
 
         if result.returncode != 0:
+            _LOGGER.warning("Bitwarden CLI operation %s failed", operation)
             raise BitwardenCLIError(
                 "Bitwarden CLI command failed; inspect `bw` directly for details"
             )
         try:
             response = json.loads(result.stdout)
         except json.JSONDecodeError as error:
+            _LOGGER.warning(
+                "Bitwarden CLI operation %s returned invalid JSON", operation
+            )
             raise BitwardenCLIError(
                 "Bitwarden CLI returned an invalid JSON response"
             ) from error
         if not isinstance(response, dict):
+            _LOGGER.warning(
+                "Bitwarden CLI operation %s returned an invalid response", operation
+            )
             raise BitwardenCLIError("Bitwarden CLI returned an unexpected response")
         if response.get("success") is False:
+            _LOGGER.warning("Bitwarden CLI operation %s was rejected", operation)
             raise BitwardenCLIError("Bitwarden CLI rejected the requested operation")
+        _LOGGER.debug("Bitwarden CLI operation %s completed", operation)
         return response
 
 
@@ -137,3 +152,17 @@ def _session_key(response: dict[str, Any]) -> str:
     if not isinstance(raw_key, str) or not raw_key:
         raise BitwardenCLIError("Bitwarden CLI response did not include a session key")
     return raw_key
+
+
+def _safe_operation(arguments: Sequence[str]) -> str:
+    """Return only an allowlisted operation name for use in log messages."""
+    if arguments and arguments[0] in {
+        "status",
+        "login",
+        "unlock",
+        "list",
+        "get",
+        "sync",
+    }:
+        return arguments[0]
+    return "other"

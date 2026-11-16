@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import getpass
+import logging
 import os
 from collections.abc import Callable
 from typing import Any, Protocol
 
 from bitwarden_autofiller.vault.bitwarden import BitwardenCLIError
 from bitwarden_autofiller.vault.service import BitwardenCommandClient, VaultService
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class AuthenticationClient(BitwardenCommandClient, Protocol):
@@ -41,9 +44,11 @@ def authenticate_vault(
     password-environment mechanism establishes a fresh session.
     """
     status = _vault_status(cli.status())
+    _LOGGER.info("Bitwarden vault status: %s", status)
     if status == "unlocked":
         existing_key = session_key or os.environ.get("BW_SESSION")
         if existing_key:
+            _LOGGER.info("Reusing the active Bitwarden CLI session")
             return VaultService(cli, existing_key)
         # The CLI can report an unlocked local state while this process does
         # not possess BW_SESSION. Unlocking returns an explicit key scoped to
@@ -61,6 +66,7 @@ def authenticate_vault(
 
     if not session_key:
         raise AuthenticationError("Bitwarden CLI did not provide a session key")
+    _LOGGER.info("Bitwarden vault authentication completed")
     return VaultService(cli, session_key)
 
 

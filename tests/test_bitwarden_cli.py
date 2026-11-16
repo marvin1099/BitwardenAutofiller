@@ -60,14 +60,38 @@ def test_session_key_is_passed_through_environment(
 
 
 def test_cli_errors_do_not_echo_subprocess_output_or_secrets(
-    fake_bw: tuple[list[str], Path, Path], monkeypatch: pytest.MonkeyPatch
+    fake_bw: tuple[list[str], Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     command, log_path, _ = fake_bw
     monkeypatch.setenv("BW_TEST_LOG", str(log_path))
     monkeypatch.setenv("BW_TEST_FAIL", "1")
     client = BitwardenCLI(command)
 
-    with pytest.raises(BitwardenCLIError) as raised:
+    with (
+        caplog.at_level("DEBUG", logger="bitwarden_autofiller"),
+        pytest.raises(BitwardenCLIError) as raised,
+    ):
         client.command(["status"])
 
     assert "sensitive-looking" not in str(raised.value)
+    assert "sensitive-looking" not in caplog.text
+
+
+def test_cli_debug_logs_omit_email_and_master_password(
+    fake_bw: tuple[list[str], Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    command, log_path, _ = fake_bw
+    monkeypatch.setenv("BW_TEST_LOG", str(log_path))
+
+    with caplog.at_level("DEBUG", logger="bitwarden_autofiller"):
+        BitwardenCLI(command).login(
+            "private-account@example.test", "private-master-password"
+        )
+
+    assert "operation login" in caplog.text
+    assert "private-account@example.test" not in caplog.text
+    assert "private-master-password" not in caplog.text

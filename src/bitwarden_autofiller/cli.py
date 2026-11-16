@@ -25,6 +25,7 @@ from bitwarden_autofiller.desktop.platforms import (
 )
 from bitwarden_autofiller.filling.actions import parse_action_sequence
 from bitwarden_autofiller.filling.workflow import FillService, fill_for_app
+from bitwarden_autofiller.logging_config import configure_logging
 from bitwarden_autofiller.vault.authentication import (
     AuthenticationError,
     authenticate_vault,
@@ -84,6 +85,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Seconds to wait before sending input (default: 3)",
     )
     parser.add_argument(
+        "--log-level",
+        choices=("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"),
+        help="Safe diagnostic log level (default: WARNING)",
+    )
+    parser.add_argument(
         "--version", action="version", version=f"%(prog)s {__version__}"
     )
     parser.epilog = (
@@ -96,6 +102,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    configure_logging(args.log_level)
     try:
         app_id = resolve_app_id(args.app_id)
         actions = parse_action_sequence(args.actions)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
@@ -12,6 +13,8 @@ from bitwarden_autofiller.vault.items import (
     LoginCredentials,
     LoginSummary,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class FillService(Protocol):
@@ -67,11 +70,17 @@ def fill_for_app(
         finally:
             del credentials
 
-    return FillResult(
+    result = FillResult(
         matched_items=len(matches),
         selected_items=selected_items,
         input_operations=input_operations,
     )
+    _LOGGER.info(
+        "Autofill completed for %d selected login(s) with %d input operation(s)",
+        result.selected_items,
+        result.input_operations,
+    )
+    return result
 
 
 def _needs_password(actions: Sequence[Action]) -> bool:

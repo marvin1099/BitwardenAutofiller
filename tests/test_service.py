@@ -84,6 +84,21 @@ def test_service_fetches_only_the_selected_matching_login() -> None:
     assert all(session == "session-key-for-tests" for _, session in cli.calls)
 
 
+def test_vault_logs_include_match_counts_but_not_account_data(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    cli = FakeBitwardenCLI()
+    service = VaultService(cli, "session-key-for-tests")
+
+    with caplog.at_level("DEBUG", logger="bitwarden_autofiller"):
+        service.list_matches("steam")
+
+    assert "1 matching login(s)" in caplog.text
+    assert "steam-login" not in caplog.text
+    assert "alice" not in caplog.text
+    assert "steam" not in caplog.text
+
+
 def test_service_refuses_to_fetch_an_item_mapped_to_another_app() -> None:
     cli = FakeBitwardenCLI()
     service = VaultService(cli, "session-key-for-tests")

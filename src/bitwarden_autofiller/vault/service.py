@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Protocol
 
 from bitwarden_autofiller.vault.items import (
@@ -11,6 +12,8 @@ from bitwarden_autofiller.vault.items import (
     matching_logins,
     summaries_from_response,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class BitwardenCommandClient(Protocol):
@@ -41,7 +44,9 @@ class VaultService:
         """Return non-secret login summaries mapped to ``app_id``."""
         session_key = self._require_session()
         response = self._cli.command(["list", "items"], session_key=session_key)
-        return matching_logins(summaries_from_response(response), app_id)
+        matches = matching_logins(summaries_from_response(response), app_id)
+        _LOGGER.debug("Vault lookup completed with %d matching login(s)", len(matches))
+        return matches
 
     def get_login(self, app_id: str, item_id: str) -> LoginCredentials:
         """Retrieve a single login after verifying its app mapping."""
@@ -66,6 +71,7 @@ class VaultService:
             raise ItemNotMatchedError(
                 "The selected login no longer matches the active application"
             )
+        _LOGGER.debug("Retrieved one verified mapped login")
         return credentials
 
     def get_totp(self, app_id: str, item_id: str) -> str:
@@ -81,6 +87,7 @@ class VaultService:
         value = _response_value(response)
         if not isinstance(value, str) or not value:
             raise ValueError("Bitwarden CLI returned no TOTP for the selected item")
+        _LOGGER.debug("Retrieved a TOTP for one verified mapped login")
         return value
 
     def sync(self) -> None:

@@ -19,6 +19,7 @@ from bitwarden_autofiller.daemon.security import (
     load_or_create_auth_token,
     read_auth_token,
 )
+from bitwarden_autofiller.logging_config import configure_logging
 from bitwarden_autofiller.vault.authentication import authenticate_vault
 from bitwarden_autofiller.vault.bitwarden import BitwardenCLI, BitwardenCLIError
 
@@ -34,6 +35,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="bitwarden-autofiller-daemon",
         description="Run or stop the authenticated Bitwarden Autofiller daemon.",
+    )
+    parser.add_argument(
+        "--log-level",
+        choices=("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"),
+        help="Safe diagnostic log level (default: WARNING)",
     )
     commands = parser.add_subparsers(dest="command", required=True)
 
@@ -56,6 +62,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    configure_logging(args.log_level)
     try:
         if args.command == "stop":
             token = read_auth_token(args.token_file)

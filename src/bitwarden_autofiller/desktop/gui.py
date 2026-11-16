@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -31,12 +32,15 @@ from bitwarden_autofiller.desktop.platforms import (
 )
 from bitwarden_autofiller.filling.actions import Action, parse_action_sequence
 from bitwarden_autofiller.filling.workflow import FillResult, fill_for_app
+from bitwarden_autofiller.logging_config import configure_logging
 from bitwarden_autofiller.vault.authentication import (
     AuthenticationError,
     authenticate_vault,
 )
 from bitwarden_autofiller.vault.bitwarden import BitwardenCLI, BitwardenCLIError
 from bitwarden_autofiller.vault.service import VaultService
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class _OperationWorker(QObject):
@@ -52,6 +56,7 @@ class _OperationWorker(QObject):
         try:
             result = self._operation()
         except Exception as error:
+            _LOGGER.warning("GUI operation failed (%s)", type(error).__name__)
             if isinstance(
                 error,
                 (AuthenticationError, BitwardenCLIError, InputBackendError, ValueError),
@@ -374,6 +379,7 @@ class BitwardenAutofillerWindow(QMainWindow):
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    configure_logging()
     arguments = list(sys.argv if argv is None else [sys.argv[0], *argv])
     app = QApplication(arguments)
     app.setApplicationName("Bitwarden Autofiller")
