@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 import subprocess
@@ -22,7 +23,12 @@ class InputBackendError(RuntimeError):
 class WaylandInputAdapter:
     """Type through eitype's XDG RemoteDesktop portal integration."""
 
-    def __init__(self, *, clipboard_copy: Callable[[str], None] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        clipboard_copy: Callable[[str], None] | None = None,
+        clipboard_cleanup: Callable[[str], None] | None = None,
+    ) -> None:
         try:
             eitype = import_module("eitype")
         except ImportError as error:
@@ -56,6 +62,7 @@ class WaylandInputAdapter:
                 "Could not obtain Wayland input permission from the desktop portal"
             ) from error
         self._clipboard_copy = clipboard_copy or _copy_to_system_clipboard
+        self._clipboard_cleanup = clipboard_cleanup
 
     def type_text(self, text: str) -> None:
         for character in text:
@@ -70,8 +77,13 @@ class WaylandInputAdapter:
 
     def _paste_text(self, text: str) -> None:
         clipboard_process: subprocess.Popen[str] | None = None
+        callback_clipboard = False
+        cleanup_attempted = False
         try:
             clipboard_process = _copy_text_for_wayland_paste(text, self._clipboard_copy)
+            callback_clipboard = (
+                clipboard_process is None and self._clipboard_cleanup is not None
+            )
             self._typer.hold_modifier("ctrl")
             try:
                 # Use eitype's active-keymap mapping for the paste shortcut.
@@ -80,14 +92,29 @@ class WaylandInputAdapter:
                 self._typer.release_modifiers()
             if clipboard_process is not None:
                 _finish_wl_copy_once(clipboard_process)
+            elif callback_clipboard and self._clipboard_cleanup is not None:
+                cleanup_attempted = True
+                self._clipboard_cleanup(text)
         except InputBackendError:
             if clipboard_process is not None:
                 _stop_wl_copy_once(clipboard_process)
+            if callback_clipboard and not cleanup_attempted:
+                self._best_effort_clipboard_cleanup(text)
             raise
         except Exception as error:
             if clipboard_process is not None:
                 _stop_wl_copy_once(clipboard_process)
+            if callback_clipboard and not cleanup_attempted:
+                self._best_effort_clipboard_cleanup(text)
             raise InputBackendError("Wayland Unicode clipboard paste failed") from error
+
+    def _best_effort_clipboard_cleanup(self, text: str) -> None:
+        if self._clipboard_cleanup is None:
+            return
+        # Preserve the original input error; the callback only clears the
+        # clipboard if its temporary ownership marker is still present.
+        with contextlib.suppress(Exception):
+            self._clipboard_cleanup(text)
 
     def press_key(self, key: str) -> None:
         try:
@@ -167,7 +194,9 @@ class LazyInputAdapter:
 
 
 def create_input_adapter(
-    *, clipboard_copy: Callable[[str], None] | None = None
+    *,
+    clipboard_copy: Callable[[str], None] | None = None,
+    clipboard_cleanup: Callable[[str], None] | None = None,
 ) -> WaylandInputAdapter | PyAutoGuiInputAdapter:
     """Choose the current session backend without unsafe Wayland fallback."""
     if sys.platform == "linux":
@@ -175,7 +204,10 @@ def create_input_adapter(
             os.environ.get("WAYLAND_DISPLAY")
             or os.environ.get("XDG_SESSION_TYPE", "").casefold() == "wayland"
         ):
-            return WaylandInputAdapter(clipboard_copy=clipboard_copy)
+            return WaylandInputAdapter(
+                clipboard_copy=clipboard_copy,
+                clipboard_cleanup=clipboard_cleanup,
+            )
         if os.environ.get("DISPLAY"):
             return PyAutoGuiInputAdapter(clipboard_copy=clipboard_copy)
         raise InputBackendError("No supported Linux desktop session was detected")

@@ -191,6 +191,69 @@ def test_worker_clipboard_callback_is_synchronized_with_the_gui_thread(
     clipboard = QGuiApplication.clipboard()
     assert clipboard is not None
     assert clipboard.text() == "unicode ☃"
+
+    cleanup_loop = QEventLoop()
+    cleanup_timer = QTimer()
+    with ThreadPoolExecutor() as executor:
+        cleanup = executor.submit(
+            window._clear_input_clipboard_from_worker, "unicode ☃"
+        )
+        cleanup_timer.timeout.connect(
+            lambda: cleanup_loop.quit() if cleanup.done() else None
+        )
+        cleanup_timer.start(10)
+        QTimer.singleShot(5000, cleanup_loop.quit)
+        cleanup_loop.exec()
+        cleanup_timer.stop()
+        assert cleanup.done()
+        cleanup.result(timeout=0)
+
+    assert clipboard.text() == ""
+    window.close()
+    app.processEvents()
+
+
+@pytest.mark.parametrize("replacement", ("new clipboard value", "unicode ☃"))
+def test_worker_cleanup_preserves_newer_clipboard_contents(
+    tmp_path: Path, replacement: str
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
+    window = BitwardenAutofillerWindow(settings=settings)
+    clipboard = QGuiApplication.clipboard()
+    assert clipboard is not None
+    loop = QEventLoop()
+    timer = QTimer()
+    timer.setInterval(10)
+
+    with ThreadPoolExecutor() as executor:
+        copied = executor.submit(window._copy_to_clipboard_from_worker, "unicode ☃")
+        timer.timeout.connect(lambda: loop.quit() if copied.done() else None)
+        timer.start()
+        QTimer.singleShot(5000, loop.quit)
+        loop.exec()
+        timer.stop()
+        assert copied.done()
+        copied.result(timeout=0)
+
+    clipboard.setText(replacement)
+    cleanup_loop = QEventLoop()
+    cleanup_timer = QTimer()
+    with ThreadPoolExecutor() as executor:
+        cleanup = executor.submit(
+            window._clear_input_clipboard_from_worker, "unicode ☃"
+        )
+        cleanup_timer.timeout.connect(
+            lambda: cleanup_loop.quit() if cleanup.done() else None
+        )
+        cleanup_timer.start(10)
+        QTimer.singleShot(5000, cleanup_loop.quit)
+        cleanup_loop.exec()
+        cleanup_timer.stop()
+        assert cleanup.done()
+        cleanup.result(timeout=0)
+
+    assert clipboard.text() == replacement
     window.close()
     app.processEvents()
 

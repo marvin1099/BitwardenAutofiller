@@ -15,7 +15,8 @@ Remote Desktop portal plus compositor-supported active-app detection.
 - Wayland types text one character at a time through the active keymap and pastes
   only characters the keymap cannot represent. Install `wl-clipboard` for the
   CLI fallback; the CLI's optional `desktop` extra also provides `pyperclip`,
-  and the GUI can use Qt's clipboard.
+  and the GUI can use Qt's clipboard. The GUI clears temporary paste text only
+  when its ownership marker is still present, so a newer clipboard copy is kept.
 - The `desktop` extra includes PyWinCtl for X11 active-window detection; it is
   retained for older X11 clients.
 - On Wayland, install the `wayland` extra for input support and wlr

@@ -9,8 +9,18 @@ from concurrent.futures import Future
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
-from PySide6.QtCore import QObject, QSettings, QThread, QTimer, Signal, Slot
+from PySide6.QtCore import (
+    QByteArray,
+    QMimeData,
+    QObject,
+    QSettings,
+    QThread,
+    QTimer,
+    Signal,
+    Slot,
+)
 from PySide6.QtGui import QCloseEvent, QGuiApplication, QIcon
 from PySide6.QtWidgets import (
     QApplication,
@@ -62,6 +72,7 @@ from bitwarden_autofiller.vault.service import VaultService
 
 _LOGGER = logging.getLogger(__name__)
 APP_DETECTION_MINIMUM_SECONDS = 3
+_TEMPORARY_CLIPBOARD_MARKER = "application/x-bitwarden-autofiller-temporary"
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,6 +157,7 @@ class BitwardenAutofillerWindow(QMainWindow):
 
     clipboard_requested = Signal(str)
     _input_clipboard_requested = Signal(str, object)
+    _input_clipboard_cleanup_requested = Signal(str, object)
 
     def __init__(
         self,
@@ -167,6 +179,8 @@ class BitwardenAutofillerWindow(QMainWindow):
         self._pending_fill_actions: tuple[Action, ...] | None = None
         self._pending_fill_app_id: str | None = None
         self._pending_app_detection = False
+        self._temporary_clipboard_text: str | None = None
+        self._temporary_clipboard_token: str | None = None
         self._countdown_timer = QTimer(self)
         self._countdown_timer.setInterval(1000)
         self._countdown_timer.timeout.connect(self._countdown_tick)
@@ -181,6 +195,7 @@ class BitwardenAutofillerWindow(QMainWindow):
         self.clipboard_requested.connect(self._copy_to_clipboard)
         self._build_ui()
         self._input_clipboard_requested.connect(self._set_input_clipboard)
+        self._input_clipboard_cleanup_requested.connect(self._clear_input_clipboard)
         self._restore_settings()
 
     def _build_ui(self) -> None:
@@ -662,7 +677,8 @@ class BitwardenAutofillerWindow(QMainWindow):
         def fill() -> _FillOutcome:
             adapter = LazyInputAdapter(
                 lambda: create_input_adapter(
-                    clipboard_copy=self._copy_to_clipboard_from_worker
+                    clipboard_copy=self._copy_to_clipboard_from_worker,
+                    clipboard_cleanup=self._clear_input_clipboard_from_worker,
                 )
             )
             try:
@@ -847,6 +863,17 @@ class BitwardenAutofillerWindow(QMainWindow):
                 "Could not set text on the desktop clipboard"
             ) from error
 
+    def _clear_input_clipboard_from_worker(self, text: str) -> None:
+        """Clear temporary paste text on Qt's thread if it is still ours."""
+        completed: Future[None] = Future()
+        self._input_clipboard_cleanup_requested.emit(text, completed)
+        try:
+            completed.result(timeout=5.0)
+        except Exception as error:
+            raise InputBackendError(
+                "Could not safely clear temporary clipboard text"
+            ) from error
+
     @Slot(str, object)
     def _set_input_clipboard(self, text: str, completed: object) -> None:
         if not isinstance(completed, Future):
@@ -855,11 +882,47 @@ class BitwardenAutofillerWindow(QMainWindow):
             clipboard = QGuiApplication.clipboard()
             if clipboard is None:
                 raise InputBackendError("The desktop clipboard is unavailable")
-            clipboard.setText(text)
+            token = uuid4().hex
+            mime_data = QMimeData()
+            mime_data.setText(text)
+            mime_data.setData(_TEMPORARY_CLIPBOARD_MARKER, token.encode("ascii"))
+            clipboard.setMimeData(mime_data)
+            self._temporary_clipboard_text = text
+            self._temporary_clipboard_token = token
         except Exception as error:
             completed.set_exception(error)
         else:
             completed.set_result(None)
+
+    @Slot(str, object)
+    def _clear_input_clipboard(self, text: str, completed: object) -> None:
+        if not isinstance(completed, Future):
+            return
+        token = self._temporary_clipboard_token
+        temporary_text = self._temporary_clipboard_text
+        try:
+            clipboard = QGuiApplication.clipboard()
+            if clipboard is None:
+                raise InputBackendError("The desktop clipboard is unavailable")
+            mime_data = clipboard.mimeData()
+            if (
+                token is not None
+                and temporary_text == text
+                and mime_data is not None
+                and mime_data.hasFormat(_TEMPORARY_CLIPBOARD_MARKER)
+                and mime_data.data(_TEMPORARY_CLIPBOARD_MARKER)
+                == QByteArray(token.encode("ascii"))
+                and mime_data.text() == text
+            ):
+                clipboard.clear()
+        except Exception as error:
+            completed.set_exception(error)
+        else:
+            completed.set_result(None)
+        finally:
+            if self._temporary_clipboard_token == token:
+                self._temporary_clipboard_token = None
+                self._temporary_clipboard_text = None
 
     def closeEvent(self, event: QCloseEvent) -> None:
         if self._thread is not None and self._thread.isRunning():

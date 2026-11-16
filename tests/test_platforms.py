@@ -90,8 +90,12 @@ def test_wayland_pastes_only_the_unmappable_character_then_resumes_eitype(
         "bitwarden_autofiller.desktop.platforms.shutil.which", lambda _: None
     )
     copied: list[str] = []
+    cleaned: list[str] = []
 
-    adapter = WaylandInputAdapter(clipboard_copy=copied.append)
+    adapter = WaylandInputAdapter(
+        clipboard_copy=copied.append,
+        clipboard_cleanup=cleaned.append,
+    )
     adapter.type_text("abc☃tail")
 
     assert typer.calls == [
@@ -107,6 +111,7 @@ def test_wayland_pastes_only_the_unmappable_character_then_resumes_eitype(
         ("type", "l"),
     ]
     assert copied == ["☃"]
+    assert cleaned == ["☃"]
 
 
 def test_wayland_unicode_paste_reports_unavailable_clipboard(
@@ -139,6 +144,39 @@ def test_wayland_unicode_paste_reports_unavailable_clipboard(
         ("type", "r"),
         ("type", "e"),
     ]
+
+
+def test_wayland_unicode_paste_cleans_qt_clipboard_after_input_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FailingPasteTyper(FakeEiType):
+        def type_text(self, text: str) -> None:
+            if text == "v":
+                raise RuntimeError("paste shortcut failed")
+            super().type_text(text)
+
+    typer = FailingPasteTyper()
+    typer.unsupported_chars.add("☃")
+    eitype = ModuleType("eitype")
+    eitype.EiType = SimpleNamespace(connect_portal=lambda: typer)  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "eitype", eitype)
+    monkeypatch.setattr("bitwarden_autofiller.desktop.platforms.sys.platform", "linux")
+    monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
+    monkeypatch.setattr(
+        "bitwarden_autofiller.desktop.platforms.shutil.which", lambda _: None
+    )
+    copied: list[str] = []
+    cleaned: list[str] = []
+    adapter = WaylandInputAdapter(
+        clipboard_copy=copied.append,
+        clipboard_cleanup=cleaned.append,
+    )
+
+    with pytest.raises(InputBackendError, match="Unicode clipboard paste failed"):
+        adapter.type_text("☃")
+
+    assert copied == ["☃"]
+    assert cleaned == ["☃"]
 
 
 def test_wayland_unicode_paste_prefers_one_shot_wl_copy(
