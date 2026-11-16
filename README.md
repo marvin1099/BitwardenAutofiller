@@ -69,6 +69,14 @@ The configured command is tried first; if it fails, native detection is still
 attempted. Avoid putting credentials in the command: it is saved as a GUI
 setting or may be visible in CLI process arguments. Use `--help` for all options.
 
+When the app runs the local `bw` CLI, it uses Node.js `--use-system-ca` by
+default, appending that option to any existing `NODE_OPTIONS`. In the GUI, this
+can be disabled with **Use the system CA store for Bitwarden CLI**. To add a
+specific PEM CA, set **Additional CA certificate** in the GUI or pass
+`--bw-ca-certificate /path/to/ca.pem` to the CLI (or daemon `start` command).
+This is separate from `--ca-certificate`, which trusts a remote Autofiller
+daemon's TLS certificate.
+
 Before each typing or key action, the CLI and GUI re-check the focused
 application. KWin and PyWinCtl also expose a window handle, which is pinned on
 the first check; a later change cancels the fill, even if the new window belongs

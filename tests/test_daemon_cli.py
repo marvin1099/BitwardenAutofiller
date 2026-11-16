@@ -32,7 +32,18 @@ def test_daemon_start_authenticates_and_closes_service(
 ) -> None:
     service = FakeService()
     daemon = FakeDaemon()
-    monkeypatch.setattr(daemon_cli, "BitwardenCLI", lambda _: object())
+    bw_options: list[tuple[Path, bool, Path | None]] = []
+
+    def make_bw(
+        executable: Path,
+        *,
+        use_system_ca: bool,
+        ca_certificate: Path | None,
+    ) -> object:
+        bw_options.append((executable, use_system_ca, ca_certificate))
+        return object()
+
+    monkeypatch.setattr(daemon_cli, "BitwardenCLI", make_bw)
     monkeypatch.setattr(
         daemon_cli, "authenticate_vault", lambda *_args, **_kwargs: service
     )
@@ -44,6 +55,7 @@ def test_daemon_start_authenticates_and_closes_service(
     assert result == 0
     assert daemon.served and daemon.stopped
     assert service.closed
+    assert bw_options == [(Path("bw"), True, None)]
     assert "127.0.0.1:64756" in capsys.readouterr().out
 
 

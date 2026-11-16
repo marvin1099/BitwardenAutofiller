@@ -102,6 +102,20 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Path to the official Bitwarden CLI (default: bw)",
     )
+    parser.add_argument(
+        "--bw-system-ca",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Append Node.js --use-system-ca to bw's NODE_OPTIONS "
+            "(default: enabled; existing options are preserved)"
+        ),
+    )
+    parser.add_argument(
+        "--bw-ca-certificate",
+        type=Path,
+        help="Additional PEM CA certificate for the local Bitwarden CLI",
+    )
     parser.add_argument("--email", help="Bitwarden account email (never a password)")
     parser.add_argument(
         "--daemon-host",
@@ -172,6 +186,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         service: CLIService
         if args.daemon_host:
+            if args.bw_ca_certificate is not None or not args.bw_system_ca:
+                raise ValueError(
+                    "--bw-system-ca and --bw-ca-certificate apply only to local bw"
+                )
             token = read_auth_token(args.token_file or default_token_path())
             daemon_client = DaemonClient(
                 args.daemon_host,
@@ -183,7 +201,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             if args.ca_certificate is not None:
                 raise ValueError("--ca-certificate requires --daemon-host")
-            service = authenticate_vault(BitwardenCLI(args.bw_path), email=args.email)
+            service = authenticate_vault(
+                BitwardenCLI(
+                    args.bw_path,
+                    use_system_ca=args.bw_system_ca,
+                    ca_certificate=args.bw_ca_certificate,
+                ),
+                email=args.email,
+            )
         try:
             if args.sync:
                 service.sync()

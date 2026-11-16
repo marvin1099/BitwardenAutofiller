@@ -1,6 +1,7 @@
 import os
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -27,6 +28,7 @@ from bitwarden_autofiller.desktop.gui import (
 from bitwarden_autofiller.desktop.platforms import InputBackendError
 from bitwarden_autofiller.filling.actions import parse_action_sequence
 from bitwarden_autofiller.filling.execution import PartialFillError
+from bitwarden_autofiller.vault.bitwarden import BitwardenCLI
 from bitwarden_autofiller.vault.items import LoginCredentials, LoginSummary
 
 
@@ -63,6 +65,8 @@ def test_gui_builds_without_connecting_to_a_real_vault(tmp_path: Path) -> None:
     )
     assert window.active_app_command_edit.text() == "initial-pid-command"
     assert not window.allow_unverified_target_check.isChecked()
+    assert window.bw_system_ca_check.isChecked()
+    assert not window.bw_ca_certificate_edit.text()
     assert window.findChild(QLineEdit, "masterPasswordEdit") is window.password_edit
     assert window.password_edit.echoMode() == QLineEdit.EchoMode.Password
     assert not window.fill_button.isEnabled()
@@ -82,6 +86,8 @@ def test_gui_builds_without_connecting_to_a_real_vault(tmp_path: Path) -> None:
 
     window.email_edit.setText("alice@example.test")
     window.active_app_command_edit.setText("printf 4242")
+    window.bw_system_ca_check.setChecked(False)
+    window.bw_ca_certificate_edit.setText("/tmp/local-ca.pem")
     window.allow_unverified_target_check.setChecked(True)
     window.password_edit.setText("do-not-persist-this-password")
     window.close()
@@ -90,10 +96,52 @@ def test_gui_builds_without_connecting_to_a_real_vault(tmp_path: Path) -> None:
 
     assert not settings.contains("password")
     assert settings.value("active_app_command") == "printf 4242"
+    assert settings.value("bw_system_ca") is False
+    assert settings.value("bw_ca_certificate") == "/tmp/local-ca.pem"
     assert not settings.contains("allow_unverified_target")
     assert "do-not-persist-this-password" not in settings_path.read_text(
         encoding="utf-8"
     )
+
+
+def test_gui_passes_ca_settings_to_bitwarden_cli_factory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
+    created: list[tuple[str | Path, bool, str | Path | None]] = []
+    service = FakeVaultService(
+        LoginSummary("entry", "Example", "alice", ("pcprocess://steam",))
+    )
+
+    def cli_factory(
+        executable: str | Path,
+        *,
+        use_system_ca: bool = True,
+        ca_certificate: str | Path | None = None,
+    ) -> BitwardenCLI:
+        created.append((executable, use_system_ca, ca_certificate))
+        return cast(BitwardenCLI, object())
+
+    window = BitwardenAutofillerWindow(settings=settings, cli_factory=cli_factory)
+    window.bw_path_edit.setText("/usr/bin/bw")
+    window.bw_system_ca_check.setChecked(False)
+    window.bw_ca_certificate_edit.setText("/tmp/local-ca.pem")
+    monkeypatch.setattr(
+        gui_module, "authenticate_vault", lambda *_args, **_kwargs: service
+    )
+    monkeypatch.setattr(window, "_connected", lambda _service: None)
+
+    def run_worker(operation: object, on_complete: object) -> None:
+        assert callable(operation) and callable(on_complete)
+        on_complete(operation())
+
+    monkeypatch.setattr(window, "_start_worker", run_worker)
+    window._connect_to_vault()
+
+    assert created == [("/usr/bin/bw", False, "/tmp/local-ca.pem")]
+    window.close()
+    app.processEvents()
 
 
 def test_accounts_view_shows_names_and_per_account_actions(tmp_path: Path) -> None:

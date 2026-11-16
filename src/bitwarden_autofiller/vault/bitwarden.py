@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shlex
 import subprocess
 from collections.abc import Sequence
 from pathlib import Path
@@ -31,6 +32,8 @@ class BitwardenCLI:
         executable: str | Path | Sequence[str] = "bw",
         *,
         timeout: float = 30.0,
+        use_system_ca: bool = True,
+        ca_certificate: str | Path | None = None,
     ) -> None:
         self.executable = (
             (str(executable),)
@@ -40,6 +43,14 @@ class BitwardenCLI:
         if not self.executable:
             raise ValueError("Bitwarden CLI executable cannot be empty")
         self.timeout = timeout
+        self.use_system_ca = use_system_ca
+        if ca_certificate is None or not str(ca_certificate).strip():
+            self.ca_certificate: Path | None = None
+        else:
+            certificate_path = Path(ca_certificate).expanduser()
+            if not certificate_path.is_file():
+                raise ValueError("Bitwarden CA certificate file was not found")
+            self.ca_certificate = certificate_path.resolve()
 
     def status(self) -> dict[str, Any]:
         """Return a parsed, response-mode status object."""
@@ -90,6 +101,12 @@ class BitwardenCLI:
 
         environment = os.environ.copy()
         environment["BW_NOINTERACTION"] = "true"
+        if self.use_system_ca:
+            environment["NODE_OPTIONS"] = _append_node_option(
+                environment.get("NODE_OPTIONS", ""), "--use-system-ca"
+            )
+        if self.ca_certificate is not None:
+            environment["NODE_EXTRA_CA_CERTS"] = str(self.ca_certificate)
         environment.pop(PASSWORD_ENVIRONMENT_VARIABLE, None)
         if clear_session:
             environment.pop("BW_SESSION", None)
@@ -152,6 +169,19 @@ def _session_key(response: dict[str, Any]) -> str:
     if not isinstance(raw_key, str) or not raw_key:
         raise BitwardenCLIError("Bitwarden CLI response did not include a session key")
     return raw_key
+
+
+def _append_node_option(options: str, option: str) -> str:
+    """Append a Node option without discarding or duplicating user options."""
+    try:
+        existing_options = shlex.split(options)
+    except ValueError:
+        # Preserve even a malformed user value; Node will report its own syntax
+        # error, but this process must not silently replace their configuration.
+        existing_options = options.split()
+    if option in existing_options:
+        return options
+    return f"{options.rstrip()} {option}".strip()
 
 
 def _safe_operation(arguments: Sequence[str]) -> str:

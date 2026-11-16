@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+from pathlib import Path
 
 import pytest
 
@@ -65,7 +66,7 @@ def setup_cli(
 ) -> tuple[FakeService, FakeInput]:
     fake_service = service or FakeService()
     fake_input = input_adapter or FakeInput()
-    monkeypatch.setattr(cli, "BitwardenCLI", lambda _: object())
+    monkeypatch.setattr(cli, "BitwardenCLI", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(
         cli, "authenticate_vault", lambda _client, *, email=None: fake_service
     )
@@ -169,6 +170,42 @@ def test_cli_fills_and_closes_service_and_input_adapter(
     assert "3 input operation(s)" in capsys.readouterr().out
 
 
+def test_cli_passes_bitwarden_ca_options_to_local_cli(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    setup_cli(monkeypatch)
+    certificate = Path("/tmp/test-bw-ca.pem")
+    created: list[tuple[Path, bool, Path | None]] = []
+
+    def fake_bw(
+        executable: Path,
+        *,
+        use_system_ca: bool,
+        ca_certificate: Path | None,
+    ) -> object:
+        created.append((executable, use_system_ca, ca_certificate))
+        return object()
+
+    monkeypatch.setattr(cli, "BitwardenCLI", fake_bw)
+
+    assert (
+        cli.main(
+            [
+                "--app-id",
+                "steam",
+                "--delay",
+                "0",
+                "--no-bw-system-ca",
+                "--bw-ca-certificate",
+                str(certificate),
+            ]
+        )
+        == 0
+    )
+
+    assert created == [(Path("bw"), False, certificate)]
+
+
 def test_cli_detects_active_app_after_the_focus_countdown(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -212,7 +249,7 @@ def test_cli_uses_the_first_match_uri_profile_when_actions_are_not_overridden(
         (LoginSummary("one", "First", "alice", ("pcprocess://steam?actions=14",)),)
     )
     input_adapter = FakeInput()
-    monkeypatch.setattr(cli, "BitwardenCLI", lambda _: object())
+    monkeypatch.setattr(cli, "BitwardenCLI", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(
         cli, "authenticate_vault", lambda _client, *, email=None: service
     )
@@ -367,7 +404,7 @@ def test_cli_handles_unsafe_or_unavailable_input_without_echoing_secrets(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     service = FakeService()
-    monkeypatch.setattr(cli, "BitwardenCLI", lambda _: object())
+    monkeypatch.setattr(cli, "BitwardenCLI", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(
         cli, "authenticate_vault", lambda _client, *, email=None: service
     )

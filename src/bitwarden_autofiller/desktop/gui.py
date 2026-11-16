@@ -25,6 +25,7 @@ from PySide6.QtGui import QCloseEvent, QGuiApplication, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
+    QFileDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -168,7 +169,7 @@ class BitwardenAutofillerWindow(QMainWindow):
         self,
         *,
         settings: QSettings | None = None,
-        cli_factory: Callable[[str | Path], BitwardenCLI] = BitwardenCLI,
+        cli_factory: Callable[..., BitwardenCLI] = BitwardenCLI,
     ) -> None:
         super().__init__()
         self._settings = settings or QSettings("BitwardenAutofiller", "DesktopClient")
@@ -235,9 +236,33 @@ class BitwardenAutofillerWindow(QMainWindow):
         self.bw_path_edit = QLineEdit("bw")
         self.bw_path_edit.setObjectName("bitwardenCliPathEdit")
         self.bw_path_edit.setPlaceholderText("bw")
+        self.bw_system_ca_check = QCheckBox("Use the system CA store for Bitwarden CLI")
+        self.bw_system_ca_check.setObjectName("bwSystemCaCheck")
+        self.bw_system_ca_check.setChecked(True)
+        self.bw_system_ca_check.setToolTip(
+            "Adds Node.js --use-system-ca when running bw. Existing NODE_OPTIONS "
+            "are preserved; options already set in the environment remain active "
+            "even if this is unchecked."
+        )
+        self.bw_ca_certificate_edit = QLineEdit()
+        self.bw_ca_certificate_edit.setObjectName("bwCaCertificateEdit")
+        self.bw_ca_certificate_edit.setPlaceholderText(
+            "Optional additional PEM CA certificate"
+        )
+        self.bw_ca_certificate_edit.setToolTip(
+            "Optional CA certificate passed to Node.js through "
+            "NODE_EXTRA_CA_CERTS. It is added alongside the system CA store."
+        )
+        self.browse_bw_ca_button = QPushButton("Browse…")
+        self.browse_bw_ca_button.setObjectName("browseBwCaCertificateButton")
+        bw_ca_row = QHBoxLayout()
+        bw_ca_row.addWidget(self.bw_ca_certificate_edit, 1)
+        bw_ca_row.addWidget(self.browse_bw_ca_button)
         vault_form.addRow("Email", self.email_edit)
         vault_form.addRow("Master password", self.password_edit)
         vault_form.addRow("Bitwarden CLI", self.bw_path_edit)
+        vault_form.addRow(self.bw_system_ca_check)
+        vault_form.addRow("Additional CA certificate", bw_ca_row)
         layout.addWidget(vault_box)
 
         fill_box = QGroupBox("Target and fill sequence")
@@ -370,6 +395,7 @@ class BitwardenAutofillerWindow(QMainWindow):
         self.app_id_edit.returnPressed.connect(self._load_accounts)
         self.generate_uri_button.clicked.connect(self._generate_uri)
         self.copy_uri_button.clicked.connect(self._copy_generated_uri)
+        self.browse_bw_ca_button.clicked.connect(self._browse_bw_ca_certificate)
 
     def _restore_settings(self) -> None:
         self.email_edit.setText(str(self._settings.value("email", "")))
@@ -377,6 +403,16 @@ class BitwardenAutofillerWindow(QMainWindow):
         self.active_app_command_edit.setText(
             str(self._settings.value("active_app_command", ""))
         )
+        self.bw_ca_certificate_edit.setText(
+            str(self._settings.value("bw_ca_certificate", ""))
+        )
+        use_system_ca = self._settings.value("bw_system_ca", True)
+        if isinstance(use_system_ca, bool):
+            self.bw_system_ca_check.setChecked(use_system_ca)
+        else:
+            self.bw_system_ca_check.setChecked(
+                str(use_system_ca).casefold() not in {"0", "false", "no"}
+            )
         self.actions_edit.setText(str(self._settings.value("actions", "C14724635")))
         self.bw_path_edit.setText(str(self._settings.value("bw_path", "bw")))
         prefer_profile = self._settings.value("prefer_uri_profile", True)
@@ -387,16 +423,32 @@ class BitwardenAutofillerWindow(QMainWindow):
                 str(prefer_profile).casefold() not in {"0", "false", "no"}
             )
 
+    def _browse_bw_ca_certificate(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Choose additional CA certificate",
+            self.bw_ca_certificate_edit.text(),
+            "Certificate files (*.pem *.crt *.cer);;All files (*)",
+        )
+        if path:
+            self.bw_ca_certificate_edit.setText(path)
+
     def _connect_to_vault(self) -> None:
         email = self.email_edit.text().strip() or None
         password = self.password_edit.text() or None
         cli_path = self.bw_path_edit.text().strip() or "bw"
+        use_system_ca = self.bw_system_ca_check.isChecked()
+        ca_certificate = self.bw_ca_certificate_edit.text().strip() or None
         self.password_edit.clear()
         self.status_label.setText("Checking Bitwarden vault status…")
         self._set_busy(True)
 
         def connect() -> VaultService:
-            cli = self._cli_factory(cli_path)
+            cli = self._cli_factory(
+                cli_path,
+                use_system_ca=use_system_ca,
+                ca_certificate=ca_certificate,
+            )
             return authenticate_vault(
                 cli,
                 email=email,
@@ -869,6 +921,9 @@ class BitwardenAutofillerWindow(QMainWindow):
         self.diagnostics_button.setEnabled(not busy)
         self.app_id_edit.setEnabled(not busy)
         self.active_app_command_edit.setEnabled(not busy)
+        self.bw_system_ca_check.setEnabled(not busy)
+        self.bw_ca_certificate_edit.setEnabled(not busy)
+        self.browse_bw_ca_button.setEnabled(not busy)
         self.allow_unverified_target_check.setEnabled(not busy)
         self.actions_edit.setEnabled(not busy)
         self.delay_spin.setEnabled(not busy)
@@ -975,6 +1030,8 @@ class BitwardenAutofillerWindow(QMainWindow):
             "prefer_uri_profile", self.prefer_uri_profile_check.isChecked()
         )
         self._settings.setValue("bw_path", self.bw_path_edit.text())
+        self._settings.setValue("bw_system_ca", self.bw_system_ca_check.isChecked())
+        self._settings.setValue("bw_ca_certificate", self.bw_ca_certificate_edit.text())
         self._settings.sync()
         event.accept()
 

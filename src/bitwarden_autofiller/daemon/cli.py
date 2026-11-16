@@ -48,6 +48,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     start = commands.add_parser("start", help="authenticate and serve vault requests")
     start.add_argument("--bw-path", type=Path, default=Path("bw"))
+    start.add_argument(
+        "--bw-system-ca",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Append Node.js --use-system-ca to bw's NODE_OPTIONS "
+            "(default: enabled; existing options are preserved)"
+        ),
+    )
+    start.add_argument(
+        "--bw-ca-certificate",
+        type=Path,
+        help="Additional PEM CA certificate for the local Bitwarden CLI",
+    )
     start.add_argument("--email")
     start.add_argument("--host", default="127.0.0.1")
     start.add_argument("--port", type=_port, default=64756)
@@ -80,7 +94,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             print("Authenticated shutdown request sent.")
             return 0
 
-        service = authenticate_vault(BitwardenCLI(args.bw_path), email=args.email)
+        service = authenticate_vault(
+            BitwardenCLI(
+                args.bw_path,
+                use_system_ca=args.bw_system_ca,
+                ca_certificate=args.bw_ca_certificate,
+            ),
+            email=args.email,
+        )
         try:
             token = load_or_create_auth_token(args.token_file)
             daemon = AutofillDaemon(
