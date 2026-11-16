@@ -366,6 +366,12 @@ class BitwardenAutofillerWindow(QMainWindow):
         self.disconnect_button = QPushButton("Disconnect")
         self.disconnect_button.setObjectName("disconnectButton")
         self.disconnect_button.setEnabled(False)
+        self.sync_vault_button = QPushButton("Sync vault")
+        self.sync_vault_button.setObjectName("syncVaultButton")
+        self.sync_vault_button.setEnabled(False)
+        self.sync_vault_button.setToolTip(
+            "Synchronize with Bitwarden and refresh accounts for the selected app."
+        )
         self.fill_button = QPushButton("Fill now")
         self.fill_button.setObjectName("fillButton")
         self.fill_button.setEnabled(False)
@@ -373,6 +379,7 @@ class BitwardenAutofillerWindow(QMainWindow):
         self.diagnostics_button.setObjectName("desktopDiagnosticsButton")
         buttons.addWidget(self.connect_button)
         buttons.addWidget(self.disconnect_button)
+        buttons.addWidget(self.sync_vault_button)
         buttons.addWidget(self.diagnostics_button)
         buttons.addStretch(1)
         buttons.addWidget(self.fill_button)
@@ -388,6 +395,7 @@ class BitwardenAutofillerWindow(QMainWindow):
         self.setCentralWidget(central)
         self.connect_button.clicked.connect(self._connect_to_vault)
         self.disconnect_button.clicked.connect(self._disconnect_from_vault)
+        self.sync_vault_button.clicked.connect(self._sync_vault)
         self.fill_button.clicked.connect(self._start_fill_countdown)
         self.diagnostics_button.clicked.connect(self._run_diagnostics)
         self.detect_app_button.clicked.connect(self._start_app_detection)
@@ -470,6 +478,37 @@ class BitwardenAutofillerWindow(QMainWindow):
             thread.finished.connect(self._select_target_after_connection)
         else:
             self._select_target_after_connection()
+
+    def _sync_vault(self) -> None:
+        if self._busy:
+            return
+        service = self._service
+        if service is None:
+            self.status_label.setText("Connect to the vault before syncing.")
+            return
+
+        self.status_label.setText("Synchronizing vault with Bitwarden…")
+        self._set_busy(True)
+        self._start_worker(service.sync, self._vault_synced)
+
+    def _vault_synced(self, _result: Any) -> None:
+        thread = self._thread
+        if not self.app_id_edit.text().strip():
+            self.status_label.setText(
+                "Vault synced. Enter an application ID to load mapped accounts."
+            )
+            self.accounts_status_label.setText(
+                "Vault synced. Enter an application ID and load accounts."
+            )
+            self._set_busy(False)
+            return
+
+        self.status_label.setText("Vault synced. Refreshing mapped accounts…")
+        self._set_busy(False)
+        if thread is not None and thread.isRunning():
+            thread.finished.connect(self._load_accounts)
+        else:
+            self._load_accounts()
 
     def _select_target_after_connection(self) -> None:
         if self._service is None:
@@ -917,6 +956,7 @@ class BitwardenAutofillerWindow(QMainWindow):
         busy = self._busy or (self._thread is not None and self._thread.isRunning())
         self.connect_button.setEnabled(not busy)
         self.disconnect_button.setEnabled(not busy and self._service is not None)
+        self.sync_vault_button.setEnabled(not busy and self._service is not None)
         self.fill_button.setEnabled(not busy and self._service is not None)
         self.diagnostics_button.setEnabled(not busy)
         self.app_id_edit.setEnabled(not busy)

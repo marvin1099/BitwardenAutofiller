@@ -35,9 +35,14 @@ from bitwarden_autofiller.vault.items import LoginCredentials, LoginSummary
 class FakeVaultService:
     def __init__(self, summary: LoginSummary) -> None:
         self.summary = summary
+        self.events: list[str] = []
 
     def list_matches(self, _app_id: str) -> tuple[LoginSummary, ...]:
+        self.events.append("list_matches")
         return (self.summary,)
+
+    def sync(self) -> None:
+        self.events.append("sync")
 
     def get_login(self, _app_id: str, item_id: str) -> LoginCredentials:
         return LoginCredentials(item_id, username="alice", password="secret-password")
@@ -71,6 +76,7 @@ def test_gui_builds_without_connecting_to_a_real_vault(tmp_path: Path) -> None:
     assert window.password_edit.echoMode() == QLineEdit.EchoMode.Password
     assert not window.fill_button.isEnabled()
     assert not window.refresh_accounts_button.isEnabled()
+    assert not window.sync_vault_button.isEnabled()
     with pytest.raises(ValueError, match="app ID"):
         window._current_app_id()
     window.app_id_edit.setText("pcprocess://steam/")
@@ -140,6 +146,34 @@ def test_gui_passes_ca_settings_to_bitwarden_cli_factory(
     window._connect_to_vault()
 
     assert created == [("/usr/bin/bw", False, "/tmp/local-ca.pem")]
+    window.close()
+    app.processEvents()
+
+
+def test_sync_button_syncs_vault_then_reloads_mapped_accounts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
+    summary = LoginSummary("entry", "Example", "alice", ("pcprocess://steam",))
+    service = FakeVaultService(summary)
+    window = BitwardenAutofillerWindow(settings=settings)
+    window._service = service  # type: ignore[assignment]
+    window.app_id_edit.setText("steam")
+    window._refresh_buttons()
+
+    def run_worker(operation: object, on_complete: object) -> None:
+        assert callable(operation) and callable(on_complete)
+        on_complete(operation())
+
+    monkeypatch.setattr(window, "_start_worker", run_worker)
+    assert window.sync_vault_button.isEnabled()
+
+    window.sync_vault_button.click()
+
+    assert service.events == ["sync", "list_matches"]
+    assert window._matches == (summary,)
+    assert window.status_label.text() == "Mapped accounts refreshed."
     window.close()
     app.processEvents()
 
