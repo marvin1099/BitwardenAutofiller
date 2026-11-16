@@ -5,7 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-APP_URI_SCHEME = "pcprocess://"
+from bitwarden_autofiller.app_uri import (
+    application_id_from_uri,
+    normalize_app_id,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,15 +36,14 @@ def matching_logins(
     entries: tuple[LoginSummary, ...] | list[LoginSummary], app_id: str | None
 ) -> tuple[LoginSummary, ...]:
     """Return logins explicitly mapped to ``app_id`` in vault order."""
-    target = _normalize_app_id(app_id)
+    target = normalize_app_id(app_id)
     if not target:
         return ()
 
-    expected_uri = f"{APP_URI_SCHEME}{target}"
     return tuple(
         entry
         for entry in entries
-        if any(uri.strip().casefold().rstrip("/") == expected_uri for uri in entry.uris)
+        if any(application_id_from_uri(uri) == target for uri in entry.uris)
     )
 
 
@@ -106,15 +108,6 @@ def credentials_from_response(response: Any) -> LoginCredentials:
         totp=_optional_string(login.get("totp")),
         uris=_uri_values(login.get("uris")),
     )
-
-
-def _normalize_app_id(app_id: str | None) -> str:
-    if not app_id:
-        return ""
-    value = app_id.strip().casefold()
-    if value.startswith(APP_URI_SCHEME):
-        value = value[len(APP_URI_SCHEME) :]
-    return value.strip("/")
 
 
 def _optional_string(value: Any) -> str | None:

@@ -10,6 +10,11 @@ from pathlib import Path
 from typing import Protocol
 
 from bitwarden_autofiller import __version__
+from bitwarden_autofiller.app_uri import (
+    AppUriError,
+    build_app_uri,
+    profile_actions_for_uris,
+)
 from bitwarden_autofiller.daemon.cli import default_token_path
 from bitwarden_autofiller.daemon.daemon import DaemonClient, DaemonRequestError
 from bitwarden_autofiller.daemon.remote import RemoteVaultService
@@ -23,8 +28,12 @@ from bitwarden_autofiller.desktop.platforms import (
     LazyInputAdapter,
     create_input_adapter,
 )
-from bitwarden_autofiller.filling.actions import parse_action_sequence
-from bitwarden_autofiller.filling.workflow import FillService, fill_for_app
+from bitwarden_autofiller.filling.actions import DEFAULT_ACTIONS, parse_action_sequence
+from bitwarden_autofiller.filling.workflow import (
+    FillService,
+    fill_for_app,
+    fill_selected_login,
+)
 from bitwarden_autofiller.logging_config import configure_logging
 from bitwarden_autofiller.vault.authentication import (
     AuthenticationError,
@@ -53,8 +62,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--actions",
-        default="C14724635",
-        help="Fill sequence (default: C14724635); see --help for action codes",
+        help=("Override the mapped URI profile; defaults to that profile or C14724635"),
+    )
+    parser.add_argument(
+        "--generate-uri",
+        action="store_true",
+        help="Generate a Bitwarden pcprocess:// URI instead of filling",
     )
     parser.add_argument(
         "--bw-path",
@@ -104,8 +117,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     configure_logging(args.log_level)
     try:
+        if args.generate_uri:
+            if not args.app_id:
+                raise AppUriError("--generate-uri requires --app-id")
+            generated_actions = (
+                parse_action_sequence(args.actions)
+                if args.actions is not None
+                else DEFAULT_ACTIONS
+            )
+            print(build_app_uri(args.app_id, generated_actions))
+            return 0
+
         app_id = resolve_app_id(args.app_id)
-        actions = parse_action_sequence(args.actions)
+        actions = (
+            parse_action_sequence(args.actions) if args.actions is not None else None
+        )
         service: CLIService
         if args.daemon_host:
             token = read_auth_token(args.token_file or default_token_path())
@@ -140,7 +166,20 @@ def main(argv: Sequence[str] | None = None) -> int:
                 time.sleep(args.delay)
             adapter = LazyInputAdapter(create_input_adapter)
             try:
-                result = fill_for_app(service, app_id, actions, adapter)
+                if actions is not None:
+                    result = fill_for_app(service, app_id, actions, adapter)
+                else:
+                    profile_actions = profile_actions_for_uris(matches[0].uris, app_id)
+                    if profile_actions is None:
+                        result = fill_for_app(service, app_id, DEFAULT_ACTIONS, adapter)
+                    else:
+                        result = fill_selected_login(
+                            service,
+                            app_id,
+                            matches[0].id,
+                            profile_actions,
+                            adapter,
+                        )
             finally:
                 close = getattr(adapter, "close", None)
                 if callable(close):

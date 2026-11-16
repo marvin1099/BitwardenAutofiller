@@ -1,5 +1,7 @@
+import pytest
+
 from bitwarden_autofiller.filling.actions import parse_action_sequence
-from bitwarden_autofiller.filling.workflow import fill_for_app
+from bitwarden_autofiller.filling.workflow import fill_for_app, fill_selected_login
 from bitwarden_autofiller.vault.items import LoginCredentials, LoginSummary
 
 
@@ -70,6 +72,37 @@ def test_workflow_uses_summary_username_without_fetching_full_item() -> None:
     assert result.input_operations == 1
     assert service.calls == [("list", "app")]
     assert input_adapter.operations == [("type", "alice")]
+
+
+def test_selected_login_workflow_fills_only_the_requested_match() -> None:
+    service = FakeService()
+    input_adapter = FakeInput()
+
+    result = fill_selected_login(
+        service,
+        "app",
+        "second",
+        parse_action_sequence("24"),
+        input_adapter,
+    )
+
+    assert result.matched_items == 2
+    assert result.selected_items == 1
+    assert service.calls == [("list", "app"), ("get", "second")]
+    assert input_adapter.operations == [("type", "password-second")]
+
+
+def test_selected_login_workflow_rejects_a_stale_or_unmapped_item() -> None:
+    service = FakeService()
+
+    with pytest.raises(ValueError, match="no longer mapped"):
+        fill_selected_login(
+            service,
+            "app",
+            "missing",
+            parse_action_sequence("14"),
+            FakeInput(),
+        )
 
 
 def test_workflow_has_no_side_effects_when_no_items_match() -> None:

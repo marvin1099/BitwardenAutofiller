@@ -22,6 +22,18 @@ def test_matching_does_not_treat_substrings_as_app_matches() -> None:
     assert matching_logins((entry,), "steam-beta") == ()
 
 
+def test_matching_ignores_profile_query_parameters() -> None:
+    entry = LoginSummary(
+        "steam-login",
+        "Steam",
+        "alice",
+        ("pcprocess://steam?actions=147",),
+    )
+
+    assert matching_logins((entry,), "steam") == (entry,)
+    assert matching_logins((entry,), "pcprocess://steam?actions=147") == (entry,)
+
+
 def test_login_summary_repr_does_not_disclose_username() -> None:
     summary = LoginSummary("1", "Private entry", "alice", ("pcprocess://app",))
 

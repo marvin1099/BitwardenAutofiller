@@ -6,6 +6,8 @@ import os
 import sys
 from importlib import import_module
 
+from bitwarden_autofiller.app_uri import APP_URI_SCHEME, normalize_app_id
+
 
 class ActiveApplicationUnavailable(RuntimeError):
     """No safe app identity could be obtained for the active window."""
@@ -20,8 +22,10 @@ def resolve_app_id(explicit_app_id: str | None = None) -> str:
     """
     if explicit_app_id and explicit_app_id.strip():
         value = explicit_app_id.strip()
-        if value.casefold().startswith("pcprocess://"):
-            value = value[len("pcprocess://") :]
+        if value.casefold().startswith(APP_URI_SCHEME):
+            value = normalize_app_id(value)
+            if not value:
+                raise ActiveApplicationUnavailable("Enter a valid application ID")
         return value.rstrip("/")
 
     is_wayland = sys.platform == "linux" and (

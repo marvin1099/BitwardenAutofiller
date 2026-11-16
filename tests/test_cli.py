@@ -84,6 +84,15 @@ def test_cli_exposes_only_nonsecret_authentication_options() -> None:
     assert raised.value.code == 2
 
 
+def test_cli_can_generate_a_profile_uri_without_vault_access(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    result = cli.main(["--generate-uri", "--app-id", "steam", "--actions", "147"])
+
+    assert result == 0
+    assert capsys.readouterr().out.strip() == "pcprocess://steam?actions=147"
+
+
 def test_cli_fills_and_closes_service_and_input_adapter(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -106,6 +115,24 @@ def test_cli_fills_and_closes_service_and_input_adapter(
     assert service.closed
     assert input_adapter.closed
     assert "3 input operation(s)" in capsys.readouterr().out
+
+
+def test_cli_uses_the_first_match_uri_profile_when_actions_are_not_overridden(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = FakeService(
+        (LoginSummary("one", "First", "alice", ("pcprocess://steam?actions=14",)),)
+    )
+    input_adapter = FakeInput()
+    monkeypatch.setattr(cli, "BitwardenCLI", lambda _: object())
+    monkeypatch.setattr(
+        cli, "authenticate_vault", lambda _client, *, email=None: service
+    )
+    monkeypatch.setattr(cli, "create_input_adapter", lambda: input_adapter)
+
+    assert cli.main(["--app-id", "steam", "--delay", "0"]) == 0
+
+    assert input_adapter.closed
 
 
 def test_cli_reports_unmapped_app_without_opening_input_backend(

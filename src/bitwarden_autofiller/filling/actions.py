@@ -47,6 +47,9 @@ def parse_action_sequence(value: str) -> tuple[Action, ...]:
     return tuple(actions)
 
 
+DEFAULT_ACTIONS = parse_action_sequence("C14724635")
+
+
 def group_account_actions(
     actions: Sequence[Action], account_count: int
 ) -> tuple[AccountActionGroup, ...]:

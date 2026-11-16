@@ -60,6 +60,18 @@ not expose a global foreground process ID through a standard API, so the app ID
 must be entered explicitly; the application does not try to bypass that privacy
 boundary.
 
+An optional `actions` parameter stores a per-login fill profile in the URI:
+
+```text
+pcprocess://steam?actions=14724635
+```
+
+The query does not affect app matching. Generate a URI from the CLI with
+`bitwarden-autofiller --generate-uri --app-id steam --actions 14724635`. If
+`--actions` is omitted when filling, the CLI uses the first matching login's
+profile, falling back to the default sequence for legacy URIs. An explicit
+`--actions` overrides the stored profile.
+
 ## Fill actions
 
 The default sequence is `C14724635`:
@@ -137,6 +149,10 @@ TLS.
 - Autofill necessarily places selected credential strings in process memory
   and sends them to the focused application. This is not an OS-level sandbox
   against a process running as the same user.
+- Application logs contain operation/status summaries only. Use
+  `--log-level DEBUG` or `BITWARDEN_AUTOFILLER_LOG_LEVEL=DEBUG` for diagnostics;
+  account names, usernames, app URIs, passwords, TOTP codes, and session tokens
+  are not logged.
 
 ## Development
 

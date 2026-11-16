@@ -44,6 +44,47 @@ def fill_for_app(
 ) -> FillResult:
     """Fill only explicitly mapped items, retrieving one item's secrets at a time."""
     matches = tuple(service.list_matches(app_id))
+    return _fill_matches(
+        service,
+        app_id,
+        matches,
+        actions,
+        input_adapter,
+        matched_items=len(matches),
+    )
+
+
+def fill_selected_login(
+    service: FillService,
+    app_id: str,
+    item_id: str,
+    actions: Sequence[Action],
+    input_adapter: InputAdapter,
+) -> FillResult:
+    """Fill one login only if it still matches the active application."""
+    matches = tuple(service.list_matches(app_id))
+    summary = next((item for item in matches if item.id == item_id), None)
+    if summary is None:
+        raise ValueError("The selected login is no longer mapped to this application")
+    return _fill_matches(
+        service,
+        app_id,
+        (summary,),
+        actions,
+        input_adapter,
+        matched_items=len(matches),
+    )
+
+
+def _fill_matches(
+    service: FillService,
+    app_id: str,
+    matches: tuple[LoginSummary, ...],
+    actions: Sequence[Action],
+    input_adapter: InputAdapter,
+    *,
+    matched_items: int,
+) -> FillResult:
     groups = group_account_actions(actions, len(matches))
     selected_items = 0
     input_operations = 0
@@ -71,7 +112,7 @@ def fill_for_app(
             del credentials
 
     result = FillResult(
-        matched_items=len(matches),
+        matched_items=matched_items,
         selected_items=selected_items,
         input_operations=input_operations,
     )
