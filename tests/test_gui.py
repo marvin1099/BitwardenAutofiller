@@ -10,13 +10,15 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtCore import QEventLoop, QSettings, QTimer
 from PySide6.QtGui import QGuiApplication
-from PySide6.QtWidgets import QApplication, QLineEdit
+from PySide6.QtWidgets import QApplication, QLineEdit, QMessageBox, QWidget
 
 from bitwarden_autofiller.desktop import app_identity
+from bitwarden_autofiller.desktop import gui as gui_module
 from bitwarden_autofiller.desktop.app_identity import (
     ActiveApplicationUnavailable,
     ActiveWindowIdentity,
 )
+from bitwarden_autofiller.desktop.diagnostics import DiagnosticItem
 from bitwarden_autofiller.desktop.gui import (
     AccountRow,
     BitwardenAutofillerWindow,
@@ -272,6 +274,53 @@ def test_worker_clipboard_callback_reports_unavailable_gui_clipboard(
     with pytest.raises(InputBackendError, match="Could not set text"):
         window._copy_to_clipboard_from_worker("unicode ☃")
 
+    window.close()
+    app.processEvents()
+
+
+def test_gui_diagnostics_button_shows_report_without_creating_input_adapter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
+    window = BitwardenAutofillerWindow(settings=settings)
+    calls: list[tuple[str | None, bool | None]] = []
+    dialogs: list[tuple[str, str]] = []
+
+    def collect(
+        *,
+        active_app_command: str | None = None,
+        gui_clipboard_available: bool | None = None,
+    ) -> tuple[DiagnosticItem, ...]:
+        calls.append((active_app_command, gui_clipboard_available))
+        return (DiagnosticItem("Clipboard", "available", "Not read."),)
+
+    def unexpected_adapter(**_kwargs: object) -> object:
+        raise AssertionError("Diagnostics must not initialize input")
+
+    def run_worker(operation: object, on_complete: object) -> None:
+        assert callable(operation) and callable(on_complete)
+        on_complete(operation())
+
+    def show_dialog(
+        _parent: QWidget, title: str, text: str
+    ) -> QMessageBox.StandardButton:
+        dialogs.append((title, text))
+        return QMessageBox.StandardButton.Ok
+
+    monkeypatch.setattr(gui_module, "collect_diagnostics", collect)
+    monkeypatch.setattr(gui_module, "create_input_adapter", unexpected_adapter)
+    monkeypatch.setattr(window, "_start_worker", run_worker)
+    monkeypatch.setattr(QMessageBox, "information", show_dialog)
+    window.active_app_command_edit.setText("trusted-active-pid-command")
+
+    window.diagnostics_button.click()
+
+    assert calls == [("trusted-active-pid-command", True)]
+    assert dialogs and dialogs[0][0] == "Desktop diagnostics"
+    assert "no input was sent" in dialogs[0][1]
+    assert "Clipboard: available" in dialogs[0][1]
+    assert "no input was sent" in window.status_label.text()
     window.close()
     app.processEvents()
 

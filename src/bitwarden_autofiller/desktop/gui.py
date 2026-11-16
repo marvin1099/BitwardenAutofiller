@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QSpinBox,
@@ -43,6 +44,10 @@ from bitwarden_autofiller.desktop.app_identity import (
     ActiveApplicationUnavailable,
     ActiveApplicationVerifier,
     resolve_app_id,
+)
+from bitwarden_autofiller.desktop.diagnostics import (
+    collect_diagnostics,
+    format_diagnostics,
 )
 from bitwarden_autofiller.desktop.platforms import (
     InputBackendError,
@@ -339,8 +344,11 @@ class BitwardenAutofillerWindow(QMainWindow):
         self.fill_button = QPushButton("Fill now")
         self.fill_button.setObjectName("fillButton")
         self.fill_button.setEnabled(False)
+        self.diagnostics_button = QPushButton("Desktop diagnostics")
+        self.diagnostics_button.setObjectName("desktopDiagnosticsButton")
         buttons.addWidget(self.connect_button)
         buttons.addWidget(self.disconnect_button)
+        buttons.addWidget(self.diagnostics_button)
         buttons.addStretch(1)
         buttons.addWidget(self.fill_button)
         layout.addLayout(buttons)
@@ -356,6 +364,7 @@ class BitwardenAutofillerWindow(QMainWindow):
         self.connect_button.clicked.connect(self._connect_to_vault)
         self.disconnect_button.clicked.connect(self._disconnect_from_vault)
         self.fill_button.clicked.connect(self._start_fill_countdown)
+        self.diagnostics_button.clicked.connect(self._run_diagnostics)
         self.detect_app_button.clicked.connect(self._start_app_detection)
         self.refresh_accounts_button.clicked.connect(self._load_accounts)
         self.app_id_edit.returnPressed.connect(self._load_accounts)
@@ -417,6 +426,28 @@ class BitwardenAutofillerWindow(QMainWindow):
             self._load_accounts()
         else:
             self._start_app_detection()
+
+    def _run_diagnostics(self) -> None:
+        clipboard_available = QGuiApplication.clipboard() is not None
+        command = self.active_app_command_edit.text().strip() or None
+        self.status_label.setText(
+            "Checking desktop integrations without sending input…"
+        )
+        self._set_busy(True)
+        self._start_worker(
+            lambda: format_diagnostics(
+                collect_diagnostics(
+                    active_app_command=command,
+                    gui_clipboard_available=clipboard_available,
+                )
+            ),
+            self._diagnostics_completed,
+        )
+
+    def _diagnostics_completed(self, report: str) -> None:
+        self.status_label.setText("Desktop diagnostics complete; no input was sent.")
+        self._set_busy(False)
+        QMessageBox.information(self, "Desktop diagnostics", report)
 
     def _start_app_detection(self) -> None:
         if self._busy:
@@ -835,6 +866,7 @@ class BitwardenAutofillerWindow(QMainWindow):
         self.connect_button.setEnabled(not busy)
         self.disconnect_button.setEnabled(not busy and self._service is not None)
         self.fill_button.setEnabled(not busy and self._service is not None)
+        self.diagnostics_button.setEnabled(not busy)
         self.app_id_edit.setEnabled(not busy)
         self.active_app_command_edit.setEnabled(not busy)
         self.allow_unverified_target_check.setEnabled(not busy)

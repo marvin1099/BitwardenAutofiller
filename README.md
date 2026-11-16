@@ -59,6 +59,12 @@ uv run bitwarden-autofiller \
   --active-app-command 'hyprctl activewindow -j | jq -r .pid'
 ```
 
+Run `uv run bitwarden-autofiller --diagnose` or choose **Desktop diagnostics**
+in the GUI to check portal, keymap dependencies, clipboard, and active-app
+detection. Diagnostics never open an input session or send input; they do not
+read clipboard contents. The active keymap itself is not probed because that
+requires an authorized portal session.
+
 The configured command is tried first; if it fails, native detection is still
 attempted. Avoid putting credentials in the command: it is saved as a GUI
 setting or may be visible in CLI process arguments. Use `--help` for all options.

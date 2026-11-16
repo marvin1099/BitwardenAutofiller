@@ -8,6 +8,7 @@ from bitwarden_autofiller.desktop.app_identity import (
     ActiveApplicationUnavailable,
     ActiveWindowIdentity,
 )
+from bitwarden_autofiller.desktop.diagnostics import DiagnosticItem
 from bitwarden_autofiller.desktop.platforms import InputBackendError
 from bitwarden_autofiller.filling.actions import Action
 from bitwarden_autofiller.filling.execution import InputAdapter, PartialFillError
@@ -105,6 +106,34 @@ def test_cli_exposes_only_nonsecret_authentication_options() -> None:
         parser.parse_args(["--password", "must-not-be-accepted"])
 
     assert raised.value.code == 2
+
+
+def test_cli_diagnostics_do_not_connect_to_vault_or_create_input(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    checked_commands: list[str | None] = []
+
+    def collect(*, active_app_command: str | None = None) -> tuple[DiagnosticItem, ...]:
+        checked_commands.append(active_app_command)
+        return (DiagnosticItem("Clipboard", "available", "No contents read."),)
+
+    def unexpected(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("Diagnostics must not access the vault or send input")
+
+    monkeypatch.setattr(cli, "collect_diagnostics", collect)
+    monkeypatch.setattr(cli, "BitwardenCLI", unexpected)
+    monkeypatch.setattr(cli, "authenticate_vault", unexpected)
+    monkeypatch.setattr(cli, "create_input_adapter", unexpected)
+
+    assert (
+        cli.main(["--diagnose", "--active-app-command", "trusted-active-pid-command"])
+        == 0
+    )
+
+    assert checked_commands == ["trusted-active-pid-command"]
+    output = capsys.readouterr().out
+    assert "Desktop diagnostics (no input was sent)" in output
+    assert "Clipboard: available" in output
 
 
 def test_cli_can_generate_a_profile_uri_without_vault_access(

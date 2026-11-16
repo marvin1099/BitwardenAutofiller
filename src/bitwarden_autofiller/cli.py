@@ -24,6 +24,10 @@ from bitwarden_autofiller.desktop.app_identity import (
     ActiveApplicationVerifier,
     resolve_app_id,
 )
+from bitwarden_autofiller.desktop.diagnostics import (
+    collect_diagnostics,
+    format_diagnostics,
+)
 from bitwarden_autofiller.desktop.platforms import (
     InputBackendError,
     LazyInputAdapter,
@@ -69,6 +73,11 @@ def build_parser() -> argparse.ArgumentParser:
             "Trusted shell command that prints the active window PID; its process "
             "name is used as the app ID when auto-detecting"
         ),
+    )
+    parser.add_argument(
+        "--diagnose",
+        action="store_true",
+        help="Check desktop integration availability without sending input",
     )
     parser.add_argument(
         "--allow-unverified-target",
@@ -135,6 +144,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     configure_logging(args.log_level)
     try:
+        if args.diagnose:
+            print(
+                format_diagnostics(
+                    collect_diagnostics(active_app_command=args.active_app_command)
+                )
+            )
+            return 0
         if args.generate_uri:
             if not args.app_id:
                 raise AppUriError("--generate-uri requires --app-id")
