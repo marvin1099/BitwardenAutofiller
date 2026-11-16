@@ -1,16 +1,19 @@
 from __future__ import annotations
 
-import asyncio
+import logging
+import subprocess
 import sys
 from ctypes import RTLD_GLOBAL
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
 from bitwarden_autofiller.desktop import app_identity, platforms, wayland_identity
 from bitwarden_autofiller.desktop.app_identity import (
     ActiveApplicationUnavailable,
+    ActiveApplicationVerifier,
     resolve_app_id,
 )
 from bitwarden_autofiller.desktop.platforms import (
@@ -25,12 +28,21 @@ from bitwarden_autofiller.desktop.platforms import (
 class FakeEiType:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
+        self.unsupported_chars: set[str] = set()
 
     def type_text(self, text: str) -> None:
+        if text in self.unsupported_chars:
+            raise RuntimeError(f"Character not found in keymap: {text}")
         self.calls.append(("type", text))
 
     def press_key(self, key: str) -> None:
         self.calls.append(("key", key))
+
+    def hold_modifier(self, modifier: str) -> None:
+        self.calls.append(("hold", modifier))
+
+    def release_modifiers(self) -> None:
+        self.calls.append(("release", ""))
 
 
 def test_wayland_factory_uses_eitype_and_clipboard_injection(
@@ -51,8 +63,237 @@ def test_wayland_factory_uses_eitype_and_clipboard_injection(
     adapter.type_text("hello")
     adapter.press_key("Tab")
     adapter.copy_text("secret")
-    assert typer.calls == [("type", "hello"), ("key", "Tab")]
+    assert typer.calls == [
+        ("type", "h"),
+        ("type", "e"),
+        ("type", "l"),
+        ("type", "l"),
+        ("type", "o"),
+        ("key", "Tab"),
+    ]
     assert copied == ["secret"]
+
+
+def test_wayland_pastes_only_the_unmappable_character_then_resumes_eitype(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    typer = FakeEiType()
+    typer.unsupported_chars.add("☃")
+    eitype = ModuleType("eitype")
+    eitype.EiType = SimpleNamespace(connect_portal=lambda: typer)  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "eitype", eitype)
+    monkeypatch.setattr("bitwarden_autofiller.desktop.platforms.sys.platform", "linux")
+    monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
+    monkeypatch.setattr(
+        "bitwarden_autofiller.desktop.platforms.shutil.which", lambda _: None
+    )
+    copied: list[str] = []
+
+    adapter = WaylandInputAdapter(clipboard_copy=copied.append)
+    adapter.type_text("abc☃tail")
+
+    assert typer.calls == [
+        ("type", "a"),
+        ("type", "b"),
+        ("type", "c"),
+        ("hold", "ctrl"),
+        ("type", "v"),
+        ("release", ""),
+        ("type", "t"),
+        ("type", "a"),
+        ("type", "i"),
+        ("type", "l"),
+    ]
+    assert copied == ["☃"]
+
+
+def test_wayland_unicode_paste_reports_unavailable_clipboard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    typer = FakeEiType()
+    typer.unsupported_chars.add("☃")
+    eitype = ModuleType("eitype")
+    eitype.EiType = SimpleNamespace(connect_portal=lambda: typer)  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "eitype", eitype)
+    monkeypatch.setattr("bitwarden_autofiller.desktop.platforms.sys.platform", "linux")
+    monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
+    monkeypatch.setattr(
+        "bitwarden_autofiller.desktop.platforms.shutil.which", lambda _: None
+    )
+
+    def unavailable_clipboard(_text: str) -> None:
+        raise InputBackendError("clipboard unavailable")
+
+    adapter = WaylandInputAdapter(clipboard_copy=unavailable_clipboard)
+
+    with pytest.raises(InputBackendError, match="clipboard unavailable"):
+        adapter.type_text("before☃after")
+
+    assert typer.calls == [
+        ("type", "b"),
+        ("type", "e"),
+        ("type", "f"),
+        ("type", "o"),
+        ("type", "r"),
+        ("type", "e"),
+    ]
+
+
+def test_wayland_unicode_paste_prefers_one_shot_wl_copy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commands: list[tuple[list[str], dict[str, object]]] = []
+    copy_callback: list[str] = []
+
+    class FakeStdin:
+        def __init__(self) -> None:
+            self.value = ""
+            self.closed = False
+
+        def write(self, text: str) -> int:
+            self.value += text
+            return len(text)
+
+        def close(self) -> None:
+            self.closed = True
+
+    class FakeClipboardProcess:
+        def __init__(self) -> None:
+            self.stdin = FakeStdin()
+            self.waited = False
+
+        def poll(self) -> int | None:
+            return None
+
+        def wait(self, timeout: float) -> int:
+            assert timeout == 2.0
+            self.waited = True
+            return 0
+
+        def terminate(self) -> None:
+            raise AssertionError("Clipboard process should exit after paste")
+
+        def kill(self) -> None:
+            raise AssertionError("Clipboard process should exit after paste")
+
+    process = FakeClipboardProcess()
+
+    def fake_popen(command: list[str], **kwargs: object) -> FakeClipboardProcess:
+        commands.append((command, kwargs))
+        return process
+
+    monkeypatch.setattr("bitwarden_autofiller.desktop.platforms.sys.platform", "linux")
+    monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
+    monkeypatch.setattr(
+        "bitwarden_autofiller.desktop.platforms.shutil.which",
+        lambda _: "/usr/bin/wl-copy",
+    )
+    monkeypatch.setattr(
+        "bitwarden_autofiller.desktop.platforms.subprocess.Popen", fake_popen
+    )
+
+    started = platforms._copy_text_for_wayland_paste("你好😀", copy_callback.append)
+
+    assert commands == [
+        (
+            [
+                "/usr/bin/wl-copy",
+                "--foreground",
+                "--paste-once",
+                "--sensitive",
+            ],
+            {
+                "stdin": subprocess.PIPE,
+                "stdout": subprocess.DEVNULL,
+                "stderr": subprocess.DEVNULL,
+                "text": True,
+                "encoding": "utf-8",
+            },
+        )
+    ]
+    started_process = cast(FakeClipboardProcess, started)
+    assert started_process is process
+    assert started_process.stdin.value == "你好😀"
+    assert started_process.stdin.closed
+    assert not started_process.waited
+    assert copy_callback == []
+
+    platforms._finish_wl_copy_once(cast(Any, started_process))
+    assert process.waited
+
+
+def test_wayland_system_clipboard_uses_pyperclip_when_wl_copy_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    copied: list[str] = []
+    pyperclip = SimpleNamespace(copy=copied.append)
+    monkeypatch.setattr("bitwarden_autofiller.desktop.platforms.sys.platform", "linux")
+    monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
+    monkeypatch.setattr(
+        "bitwarden_autofiller.desktop.platforms.shutil.which", lambda _: None
+    )
+    monkeypatch.setattr(
+        "bitwarden_autofiller.desktop.platforms.import_module",
+        lambda name: pyperclip,
+    )
+
+    platforms._copy_to_system_clipboard("clipboard value")
+
+    assert copied == ["clipboard value"]
+
+
+def test_wayland_system_clipboard_uses_sensitive_wl_copy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commands: list[list[str]] = []
+
+    def fake_run(command: list[str], **kwargs: object) -> None:
+        commands.append(command)
+        assert kwargs["input"] == "clipboard value"
+        assert kwargs["check"] is True
+
+    monkeypatch.setattr("bitwarden_autofiller.desktop.platforms.sys.platform", "linux")
+    monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
+    monkeypatch.setattr(
+        "bitwarden_autofiller.desktop.platforms.shutil.which",
+        lambda _: "/usr/bin/wl-copy",
+    )
+    monkeypatch.setattr(
+        "bitwarden_autofiller.desktop.platforms.subprocess.run", fake_run
+    )
+
+    platforms._copy_to_system_clipboard("clipboard value")
+
+    assert commands == [["/usr/bin/wl-copy", "--sensitive"]]
+
+
+def test_unconsumed_one_shot_clipboard_process_is_terminated() -> None:
+    class UnconsumedClipboardProcess:
+        returncode: int | None = None
+        terminated = False
+
+        def poll(self) -> int | None:
+            return self.returncode
+
+        def wait(self, timeout: float) -> int:
+            if timeout == 2.0 and self.returncode is None:
+                raise subprocess.TimeoutExpired("wl-copy", timeout)
+            assert timeout == 1.0
+            assert self.returncode is not None
+            return self.returncode
+
+        def terminate(self) -> None:
+            self.terminated = True
+            self.returncode = -15
+
+        def kill(self) -> None:
+            raise AssertionError("Clipboard process should terminate cleanly")
+
+    process = UnconsumedClipboardProcess()
+
+    platforms._finish_wl_copy_once(cast(Any, process))
+
+    assert process.terminated
 
 
 def test_wayland_does_not_silently_fall_back_to_x11(
@@ -266,115 +507,58 @@ def test_wlr_foreign_toplevel_detection_fails_without_a_unique_active_app(
     assert display.disconnected
 
 
-def test_kwin_script_queries_only_the_active_window_app_identity() -> None:
-    script = wayland_identity._kwin_detection_script(
-        "org.bitwardenautofiller.ActiveApp.P123",
-        "/org/bitwardenautofiller/ActiveApp",
-        "org.bitwardenautofiller.ActiveApp",
-    )
-
-    assert "workspace.activeWindow" in script
-    assert "active.resourceClass" in script
-    assert "ReturnActiveAppId" in script
-    assert "active.caption" not in script
-
-
-class _FakeDBusMessage:
-    message_type: int
-    path: str
-    interface: str
-    member: str
-    signature: str
-    body: list[object]
-
-    def __init__(self, **values: object) -> None:
-        message_type = values.get("message_type", 0)
-        self.message_type = message_type if isinstance(message_type, int) else 0
-        self.path = str(values.get("path", ""))
-        self.interface = str(values.get("interface", ""))
-        self.member = str(values.get("member", ""))
-        self.signature = str(values.get("signature", ""))
-        body = values.get("body", [])
-        self.body = body if isinstance(body, list) else []
-
-    @classmethod
-    def new_method_return(cls, _message: object) -> _FakeDBusMessage:
-        return cls(message_type=0)
-
-
-class _FakeDBusBus:
-    def __init__(self, app_id: str) -> None:
-        self.app_id = app_id
-        self.handler: object | None = None
-        self.script_path: Path | None = None
-        self.disconnected = False
-        self.called_members: list[str] = []
-
-    async def connect(self) -> _FakeDBusBus:
-        return self
-
-    async def request_name(self, _name: str) -> int:
-        return 1
-
-    def add_message_handler(self, handler: object) -> None:
-        self.handler = handler
-
-    async def call(self, message: _FakeDBusMessage) -> _FakeDBusMessage:
-        self.called_members.append(str(message.member))
-        if message.member == "loadScript":
-            self.script_path = Path(str(message.body[0]))
-            assert self.script_path.is_file()
-            return _FakeDBusMessage(message_type=0, body=[42])
-        if message.member == "run":
-            assert self.script_path is not None
-            script = self.script_path.read_text(encoding="utf-8")
-            assert "workspace.activeWindow" in script
-            assert callable(self.handler)
-            incoming = _FakeDBusMessage(
-                message_type=1,
-                path="/org/bitwardenautofiller/ActiveApp",
-                interface="org.bitwardenautofiller.ActiveApp",
-                member="ReturnActiveAppId",
-                signature="s",
-                body=[self.app_id],
-            )
-            self.handler(incoming)
-        return _FakeDBusMessage(message_type=0, body=[])
-
-    def disconnect(self) -> None:
-        self.disconnected = True
-
-
-@pytest.mark.parametrize(("app_id", "should_succeed"), (("Steam", True), ("", False)))
-def test_kwin_active_app_query_uses_a_temporary_script_and_cleans_up(
+def test_kwin_detection_uses_process_name_for_pywinctl_compatibility(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    app_id: str,
-    should_succeed: bool,
 ) -> None:
+    calls: list[list[str]] = []
+
+    def fake_run(
+        command: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        assert kwargs["timeout"] == 0.1
+        assert kwargs["check"] is True
+        return subprocess.CompletedProcess(command, 0, stdout="4242\n", stderr="")
+
     monkeypatch.setattr(
-        "bitwarden_autofiller.desktop.wayland_identity.tempfile.tempdir",
-        str(tmp_path),
+        "bitwarden_autofiller.desktop.wayland_identity.subprocess.run", fake_run
     )
-    bus = _FakeDBusBus(app_id)
-    message_types = SimpleNamespace(METHOD_CALL=1, ERROR=2)
+    monkeypatch.setattr(wayland_identity, "process_name_for_pid", lambda pid: "steam")
 
-    query = wayland_identity._detect_kwin_active_app_id(
-        lambda: bus,
-        _FakeDBusMessage,
-        message_types,
-        timeout=0.1,
+    assert wayland_identity.detect_kwin_active_app_id(timeout=0.1) == "steam"
+    assert calls == [["kdotool", "getactivewindow", "getwindowpid"]]
+
+
+def test_process_name_for_pid_reads_proc_comm(tmp_path: Path) -> None:
+    process = tmp_path / "4242"
+    process.mkdir()
+    (process / "comm").write_text("steam\n", encoding="utf-8")
+
+    assert wayland_identity.process_name_for_pid(4242, proc_root=tmp_path) == "steam"
+
+
+@pytest.mark.parametrize("process_id", ("0\n", "4242\n"))
+def test_kwin_detection_falls_back_to_window_class_without_process_name(
+    monkeypatch: pytest.MonkeyPatch,
+    process_id: str,
+) -> None:
+    calls: list[list[str]] = []
+
+    def fake_run(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        output = process_id if len(calls) == 1 else "org.kde.dolphin\n"
+        return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
+
+    monkeypatch.setattr(
+        "bitwarden_autofiller.desktop.wayland_identity.subprocess.run", fake_run
     )
-    if should_succeed:
-        assert asyncio.run(query) == "Steam"
-    else:
-        with pytest.raises(RuntimeError, match="active application"):
-            asyncio.run(query)
+    monkeypatch.setattr(wayland_identity, "process_name_for_pid", lambda _: "")
 
-    assert bus.disconnected
-    assert bus.called_members == ["loadScript", "run", "stop", "unloadScript"]
-    assert bus.script_path is not None
-    assert not bus.script_path.exists()
+    assert wayland_identity.detect_kwin_active_app_id() == "org.kde.dolphin"
+    assert calls == [
+        ["kdotool", "getactivewindow", "getwindowpid"],
+        ["kdotool", "getactivewindow", "getwindowclassname"],
+    ]
 
 
 def test_eitype_loader_uses_system_xkbcommon_for_wheel_symbol_resolution(
@@ -488,3 +672,119 @@ def test_app_identity_uses_active_window_on_x11(
     )
 
     assert resolve_app_id() == "Steam"
+
+
+def test_custom_active_app_command_resolves_pid_to_compatible_process_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commands: list[str] = []
+
+    def fake_run(command: str, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
+        assert kwargs["shell"] is True
+        assert kwargs["check"] is True
+        assert kwargs["stdin"] == subprocess.DEVNULL
+        assert kwargs["timeout"] == 2.0
+        return subprocess.CompletedProcess(command, 0, stdout="4242\n", stderr="")
+
+    monkeypatch.setattr(
+        "bitwarden_autofiller.desktop.app_identity.subprocess.run", fake_run
+    )
+    monkeypatch.setattr(app_identity, "process_name_for_pid", lambda pid: "steam")
+
+    assert resolve_app_id(active_app_command="active-window-pid") == "steam"
+    assert commands == ["active-window-pid"]
+
+
+def test_failed_custom_active_app_command_falls_back_to_pywinctl(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window = SimpleNamespace(getAppName=lambda: "Steam")
+    pywinctl = SimpleNamespace(getActiveWindow=lambda: window)
+    monkeypatch.setattr(
+        "bitwarden_autofiller.desktop.app_identity.sys.platform", "linux"
+    )
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    monkeypatch.setenv("XDG_SESSION_TYPE", "x11")
+    monkeypatch.setattr(
+        "bitwarden_autofiller.desktop.app_identity.subprocess.run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            subprocess.CalledProcessError(1, "private-command", stderr="private output")
+        ),
+    )
+    monkeypatch.setattr(app_identity, "import_module", lambda _: pywinctl)
+
+    assert resolve_app_id(active_app_command="private-command") == "Steam"
+
+
+def test_custom_active_app_command_failure_is_safe_when_native_detection_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.DEBUG)
+    monkeypatch.setattr(
+        "bitwarden_autofiller.desktop.app_identity.sys.platform", "linux"
+    )
+    monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
+    monkeypatch.delenv("XDG_SESSION_TYPE", raising=False)
+    monkeypatch.setattr(
+        "bitwarden_autofiller.desktop.app_identity.subprocess.run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            "private-command", 0, stdout="not-a-pid\n", stderr="private-output"
+        ),
+    )
+    monkeypatch.setattr(
+        app_identity,
+        "detect_wlr_active_app_id",
+        lambda: (_ for _ in ()).throw(RuntimeError("unavailable")),
+    )
+    monkeypatch.setattr(
+        app_identity,
+        "detect_kwin_active_app_id",
+        lambda: (_ for _ in ()).throw(RuntimeError("unavailable")),
+    )
+
+    with pytest.raises(ActiveApplicationUnavailable):
+        resolve_app_id(active_app_command="private-command")
+
+    assert "private-command" not in caplog.text
+    assert "private-output" not in caplog.text
+
+
+def test_active_app_verifier_compares_normalized_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(app_identity, "resolve_app_id", lambda **_: "Steam")
+    verifier = ActiveApplicationVerifier("pcprocess://steam?actions=14")
+
+    verifier.verify()
+
+    assert not verifier.unverified
+
+
+def test_active_app_verifier_cancels_when_focus_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(app_identity, "resolve_app_id", lambda **_: "browser")
+    verifier = ActiveApplicationVerifier("steam")
+
+    with pytest.raises(ActiveApplicationUnavailable, match="focused application"):
+        verifier.verify()
+
+
+def test_active_app_verifier_requires_opt_in_when_detection_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unavailable(**_: object) -> str:
+        raise ActiveApplicationUnavailable("native detector unavailable")
+
+    monkeypatch.setattr(app_identity, "resolve_app_id", unavailable)
+    verifier = ActiveApplicationVerifier("steam")
+    allowed_verifier = ActiveApplicationVerifier("steam", allow_unverified=True)
+
+    with pytest.raises(ActiveApplicationUnavailable, match="explicitly allow"):
+        verifier.verify()
+
+    allowed_verifier.verify()
+    allowed_verifier.verify()
+    assert allowed_verifier.unverified

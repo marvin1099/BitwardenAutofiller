@@ -12,9 +12,17 @@ Remote Desktop portal plus compositor-supported active-app detection.
   accesses the vault
 - A desktop session for typing. Wayland requires an XDG Remote Desktop portal
   and `libxkbcommon`; X11 and Windows use the optional PyAutoGUI backend.
-- On Wayland, install the `wayland` extra for active-app detection through
-  KWin scripting and the wlr foreign-toplevel protocol. Manual app-ID entry
-  remains available if a compositor does not expose either interface.
+- Wayland types text one character at a time through the active keymap and pastes
+  only characters the keymap cannot represent. Install `wl-clipboard` for the
+  CLI fallback; the CLI's optional `desktop` extra also provides `pyperclip`,
+  and the GUI can use Qt's clipboard.
+- The `desktop` extra includes PyWinCtl for X11 active-window detection; it is
+  retained for older X11 clients.
+- On Wayland, install the `wayland` extra for input support and wlr
+  foreign-toplevel detection. KDE Plasma 6 detection uses the `kdotool` command
+  (install it from your distribution or with `cargo install kdotool`); manual
+  app-ID entry and the custom PID command below remain available when native
+  detection is missing.
 
 ## Install and run
 
@@ -42,12 +50,34 @@ The CLI prompts for a master password without echoing it. You can provide the
 account email with `--email`; passwords are deliberately not accepted as
 command-line options. The default three-second focus delay gives you time to
 switch to the target application. Set `--delay 0` to disable it or choose a
-different delay. Use `--help` for all options.
+different delay. For a compositor without native detection, pass a trusted PID
+command such as:
+
+```sh
+uv run bitwarden-autofiller \
+  --active-app-command 'hyprctl activewindow -j | jq -r .pid'
+```
+
+The configured command is tried first; if it fails, native detection is still
+attempted. Avoid putting credentials in the command: it is saved as a GUI
+setting or may be visible in CLI process arguments. Use `--help` for all options.
+
+Before sending fill input, the CLI and GUI re-check the focused application. A
+mismatch cancels the fill. If detection is unavailable, filling stops unless you
+explicitly enable **Allow fill if active app cannot be verified** in the GUI or
+pass `--allow-unverified-target` to the CLI. That override warns that input will
+go to whichever window has focus.
 
 In the GUI, connect to the vault and detect or enter the target application ID.
-Detection waits through a focus countdown on both X11 and Wayland. Wayland
-detection uses KWin's scripting API or the compositor's foreign-toplevel
-protocol when available; otherwise enter the ID manually. Load the mapped
+Detection waits through a focus countdown on both X11 and Wayland. KDE uses
+`kdotool`; wlroots compositors use the foreign-toplevel protocol when available.
+If native detection is unavailable, enter the ID manually or configure an
+**Active-app PID command** in the GUI. The GUI saves this setting. The command is
+run through your shell and must print only the active window's numeric PID; the
+process name is used for the app ID to match PyWinCtl's previous Linux behavior.
+The configured command is tried first and native detection is the fallback.
+Only configure commands you trust, and do not include credentials. PyWinCtl is
+retained for X11 detection and PyAutoGUI for older input setups. Load the mapped
 account names, then use each account's
 **Autofill**, **Copy username**, **Copy password**, or **Copy TOTP** button. The
 GUI can also generate and copy a mapping URI from the app ID and action sequence.
@@ -63,11 +93,14 @@ pcprocess://<application-id>
 ```
 
 For example, map a Steam login to `pcprocess://steam`, then enter `steam` as the
-application ID in the GUI or CLI. Matching is case-insensitive. On supported
-Wayland compositors, detection reads the compositor-reported application ID or
-resource class; app IDs can differ between compositors, so confirm the detected
-value against the URI you mapped. No generic XDG portal currently provides this
-information, so unsupported compositors use the manual-ID fallback.
+application ID in the GUI or CLI. Matching is case-insensitive. On KDE, detected
+IDs use the active process name (the same value PyWinCtl used previously), with
+the KWin window class as a fallback when the PID or process name is unavailable.
+On wlroots compositors, detection uses the compositor-reported application ID.
+Custom PID commands also resolve to a process name. Confirm the detected value
+against the URI you mapped. No generic XDG portal currently provides active-app
+identity, so unsupported compositors can use the custom command or manual-ID
+fallback.
 
 An optional `actions` parameter stores a per-login fill profile in the URI:
 
@@ -154,7 +187,10 @@ TLS.
   comparison. Remote daemon binds require TLS.
 - Wayland input uses the XDG Remote Desktop portal via `eitype`; the compositor
   can ask the user to grant permission. If that backend is unavailable, the
-  application fails closed rather than silently falling back to X11 input.
+  application fails closed rather than silently falling back to X11 input. Text
+  is typed character-by-character using the active keymap; only an unmappable
+  character is sent through the clipboard paste fallback before keymap typing
+  resumes.
 - Autofill necessarily places selected credential strings in process memory
   and sends them to the focused application. This is not an OS-level sandbox
   against a process running as the same user.

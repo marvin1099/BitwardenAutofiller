@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 import sys
 from collections.abc import Callable, Sequence
+from concurrent.futures import Future
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +31,7 @@ from PySide6.QtWidgets import (
 from bitwarden_autofiller.app_uri import build_app_uri, profile_actions_for_uris
 from bitwarden_autofiller.desktop.app_identity import (
     ActiveApplicationUnavailable,
+    ActiveApplicationVerifier,
     resolve_app_id,
 )
 from bitwarden_autofiller.desktop.platforms import (
@@ -58,6 +61,12 @@ from bitwarden_autofiller.vault.service import VaultService
 
 _LOGGER = logging.getLogger(__name__)
 APP_DETECTION_MINIMUM_SECONDS = 3
+
+
+@dataclass(frozen=True, slots=True)
+class _FillOutcome:
+    result: FillResult
+    active_app_unverified: bool
 
 
 class _OperationWorker(QObject):
@@ -134,6 +143,7 @@ class BitwardenAutofillerWindow(QMainWindow):
     """One-window local autofill client; credentials are not stored in settings."""
 
     clipboard_requested = Signal(str)
+    _input_clipboard_requested = Signal(str, object)
 
     def __init__(
         self,
@@ -168,6 +178,7 @@ class BitwardenAutofillerWindow(QMainWindow):
         self.resize(900, 720)
         self.clipboard_requested.connect(self._copy_to_clipboard)
         self._build_ui()
+        self._input_clipboard_requested.connect(self._set_input_clipboard)
         self._restore_settings()
 
     def _build_ui(self) -> None:
@@ -183,7 +194,8 @@ class BitwardenAutofillerWindow(QMainWindow):
 
         explanation = QLabel(
             "Fill a desktop app login explicitly mapped in Bitwarden. "
-            "On Wayland, enter the app ID; the compositor controls input permission."
+            "On Wayland, configure detection or enter the app ID; the compositor "
+            "controls input permission."
         )
         explanation.setWordWrap(True)
         explanation.setObjectName("introLabel")
@@ -213,6 +225,25 @@ class BitwardenAutofillerWindow(QMainWindow):
         self.app_id_edit.setPlaceholderText(
             "e.g. steam or pcprocess://steam (Wayland: enter explicitly)"
         )
+        self.active_app_command_edit = QLineEdit()
+        self.active_app_command_edit.setObjectName("activeAppCommandEdit")
+        self.active_app_command_edit.setPlaceholderText(
+            "Optional shell command that prints the active window PID"
+        )
+        self.active_app_command_edit.setToolTip(
+            "Custom detector for unsupported desktops. When set, the command is "
+            "tried first and must print only the active window PID; its process "
+            "name becomes the app ID. It runs through your shell, so only enter "
+            "commands you trust and do not include credentials."
+        )
+        self.allow_unverified_target_check = QCheckBox(
+            "Allow fill if active app cannot be verified"
+        )
+        self.allow_unverified_target_check.setObjectName("allowUnverifiedTargetCheck")
+        self.allow_unverified_target_check.setToolTip(
+            "Bypasses the focus check only when active-app detection is unavailable. "
+            "Credentials will be sent to whichever window has focus."
+        )
         self.actions_edit = QLineEdit("C14724635")
         self.actions_edit.setObjectName("fillActionsEdit")
         self.actions_edit.setToolTip(
@@ -240,6 +271,8 @@ class BitwardenAutofillerWindow(QMainWindow):
         app_buttons.addStretch(1)
         fill_form.addRow("Application ID", self.app_id_edit)
         fill_form.addRow(app_buttons)
+        fill_form.addRow("Active-app PID command", self.active_app_command_edit)
+        fill_form.addRow(self.allow_unverified_target_check)
         fill_form.addRow("Actions", self.actions_edit)
         fill_form.addRow("Profile", self.prefer_uri_profile_check)
         fill_form.addRow("Focus delay", self.delay_spin)
@@ -315,6 +348,9 @@ class BitwardenAutofillerWindow(QMainWindow):
     def _restore_settings(self) -> None:
         self.email_edit.setText(str(self._settings.value("email", "")))
         self.app_id_edit.setText(str(self._settings.value("app_id", "")))
+        self.active_app_command_edit.setText(
+            str(self._settings.value("active_app_command", ""))
+        )
         self.actions_edit.setText(str(self._settings.value("actions", "C14724635")))
         self.bw_path_edit.setText(str(self._settings.value("bw_path", "bw")))
         prefer_profile = self._settings.value("prefer_uri_profile", True)
@@ -380,7 +416,11 @@ class BitwardenAutofillerWindow(QMainWindow):
     def _detect_current_app_now(self) -> None:
         self.status_label.setText("Detecting the active application…")
         self._set_busy(True)
-        self._start_worker(resolve_app_id, self._active_app_detected)
+        command = self.active_app_command_edit.text().strip() or None
+        self._start_worker(
+            lambda: resolve_app_id(active_app_command=command),
+            self._active_app_detected,
+        )
 
     def _active_app_detected(self, app_id: str) -> None:
         self.app_id_edit.setText(app_id)
@@ -542,7 +582,12 @@ class BitwardenAutofillerWindow(QMainWindow):
             return
         self._set_busy(True)
         self.status_label.setText(
-            f"Switch to the target app now; filling in {self._countdown} seconds…"
+            (
+                "Warning: unverified filling is enabled. "
+                if self.allow_unverified_target_check.isChecked()
+                else ""
+            )
+            + f"Switch to the target app now; filling in {self._countdown} seconds…"
         )
         self._countdown_timer.start()
 
@@ -569,7 +614,12 @@ class BitwardenAutofillerWindow(QMainWindow):
             )
         else:
             self.status_label.setText(
-                f"Switch to the target app now; filling in {self._countdown} seconds…"
+                (
+                    "Warning: unverified filling is enabled. "
+                    if self.allow_unverified_target_check.isChecked()
+                    else ""
+                )
+                + f"Switch to the target app now; filling in {self._countdown} seconds…"
             )
 
     def _begin_fill(
@@ -601,19 +651,37 @@ class BitwardenAutofillerWindow(QMainWindow):
         self._pending_fill_item_id = None
         self._pending_fill_actions = None
         self._pending_fill_app_id = None
+        verifier = ActiveApplicationVerifier(
+            app_id,
+            active_app_command=self.active_app_command_edit.text().strip() or None,
+            allow_unverified=self.allow_unverified_target_check.isChecked(),
+        )
 
-        def fill() -> FillResult:
+        def fill() -> _FillOutcome:
             adapter = LazyInputAdapter(
                 lambda: create_input_adapter(
-                    clipboard_copy=lambda text: self.clipboard_requested.emit(text)
+                    clipboard_copy=self._copy_to_clipboard_from_worker
                 )
             )
             try:
                 if item_id is not None:
-                    return fill_selected_login(
-                        service, app_id, item_id, actions, adapter
+                    result = fill_selected_login(
+                        service,
+                        app_id,
+                        item_id,
+                        actions,
+                        adapter,
+                        before_input=verifier.verify,
                     )
-                return fill_for_app(service, app_id, actions, adapter)
+                else:
+                    result = fill_for_app(
+                        service,
+                        app_id,
+                        actions,
+                        adapter,
+                        before_input=verifier.verify,
+                    )
+                return _FillOutcome(result, verifier.unverified)
             finally:
                 close = getattr(adapter, "close", None)
                 if callable(close):
@@ -694,17 +762,22 @@ class BitwardenAutofillerWindow(QMainWindow):
         )
         self._set_busy(False)
 
-    def _fill_completed(self, result: FillResult) -> None:
+    def _fill_completed(self, outcome: _FillOutcome) -> None:
+        result = outcome.result
         if result.matched_items == 0:
-            self.status_label.setText(
+            message = (
                 "No login is mapped to this app ID. Add a matching "
                 "pcprocess:// URI in Bitwarden."
             )
         else:
-            self.status_label.setText(
+            message = (
                 f"Done: {result.selected_items} login action group(s), "
                 f"{result.input_operations} input operation(s)."
             )
+        if outcome.active_app_unverified:
+            message = f"Warning: active application could not be verified; {message}"
+        self.status_label.setText(message)
+        self.allow_unverified_target_check.setChecked(False)
         self._set_busy(False)
 
     def _start_worker(
@@ -726,6 +799,7 @@ class BitwardenAutofillerWindow(QMainWindow):
 
     def _operation_failed(self, message: str) -> None:
         self.status_label.setText(message)
+        self.allow_unverified_target_check.setChecked(False)
         self._set_busy(False)
 
     def _thread_finished(self, thread: QThread) -> None:
@@ -744,6 +818,8 @@ class BitwardenAutofillerWindow(QMainWindow):
         self.disconnect_button.setEnabled(not busy and self._service is not None)
         self.fill_button.setEnabled(not busy and self._service is not None)
         self.app_id_edit.setEnabled(not busy)
+        self.active_app_command_edit.setEnabled(not busy)
+        self.allow_unverified_target_check.setEnabled(not busy)
         self.actions_edit.setEnabled(not busy)
         self.delay_spin.setEnabled(not busy)
         self.prefer_uri_profile_check.setEnabled(not busy)
@@ -758,6 +834,31 @@ class BitwardenAutofillerWindow(QMainWindow):
         if clipboard is not None:
             clipboard.setText(text)
 
+    def _copy_to_clipboard_from_worker(self, text: str) -> None:
+        """Set clipboard text on Qt's GUI thread before sending Ctrl+V."""
+        completed: Future[None] = Future()
+        self._input_clipboard_requested.emit(text, completed)
+        try:
+            completed.result(timeout=5.0)
+        except Exception as error:
+            raise InputBackendError(
+                "Could not set text on the desktop clipboard"
+            ) from error
+
+    @Slot(str, object)
+    def _set_input_clipboard(self, text: str, completed: object) -> None:
+        if not isinstance(completed, Future):
+            return
+        try:
+            clipboard = QGuiApplication.clipboard()
+            if clipboard is None:
+                raise InputBackendError("The desktop clipboard is unavailable")
+            clipboard.setText(text)
+        except Exception as error:
+            completed.set_exception(error)
+        else:
+            completed.set_result(None)
+
     def closeEvent(self, event: QCloseEvent) -> None:
         if self._thread is not None and self._thread.isRunning():
             self.status_label.setText("Please wait for the active operation to finish.")
@@ -769,6 +870,9 @@ class BitwardenAutofillerWindow(QMainWindow):
             self._service = None
         self._settings.setValue("email", self.email_edit.text())
         self._settings.setValue("app_id", self.app_id_edit.text())
+        self._settings.setValue(
+            "active_app_command", self.active_app_command_edit.text()
+        )
         self._settings.setValue("actions", self.actions_edit.text())
         self._settings.setValue(
             "prefer_uri_profile", self.prefer_uri_profile_check.isChecked()

@@ -3,6 +3,8 @@ from collections.abc import Sequence
 import pytest
 
 from bitwarden_autofiller import cli
+from bitwarden_autofiller.desktop import app_identity
+from bitwarden_autofiller.desktop.app_identity import ActiveApplicationUnavailable
 from bitwarden_autofiller.desktop.platforms import InputBackendError
 from bitwarden_autofiller.filling.actions import Action
 from bitwarden_autofiller.filling.execution import InputAdapter
@@ -36,18 +38,19 @@ class FakeService:
 class FakeInput:
     def __init__(self) -> None:
         self.closed = False
+        self.operations: list[tuple[str, str]] = []
 
     def close(self) -> None:
         self.closed = True
 
     def type_text(self, text: str) -> None:
-        pass
+        self.operations.append(("type", text))
 
     def press_key(self, key: str) -> None:
-        pass
+        self.operations.append(("key", key))
 
     def copy_text(self, text: str) -> None:
-        pass
+        self.operations.append(("copy", text))
 
 
 def setup_cli(
@@ -64,12 +67,22 @@ def setup_cli(
     )
     monkeypatch.setattr(cli, "create_input_adapter", lambda: fake_input)
 
+    def resolve(explicit_app_id: str | None = None, **_: object) -> str:
+        return explicit_app_id or "steam"
+
+    monkeypatch.setattr(cli, "resolve_app_id", resolve)
+    monkeypatch.setattr(app_identity, "resolve_app_id", resolve)
+
     def fake_fill(
         _service: object,
         _app_id: str,
         _actions: Sequence[Action],
         input_adapter: InputAdapter,
+        *,
+        before_input: object = None,
     ) -> FillResult:
+        if callable(before_input):
+            before_input()
         input_adapter.type_text("test")
         return FillResult(matched_items=1, selected_items=1, input_operations=3)
 
@@ -128,15 +141,22 @@ def test_cli_detects_active_app_after_the_focus_countdown(
         "bitwarden_autofiller.cli.time.sleep", lambda _: events.append("countdown")
     )
 
-    def detect(*_args: str | None) -> str:
-        events.append("detect")
+    def detect(*_args: str | None, active_app_command: str | None = None) -> str:
+        events.append(f"detect:{active_app_command}")
         return "steam"
 
     monkeypatch.setattr(cli, "resolve_app_id", detect)
+    monkeypatch.setattr(app_identity, "resolve_app_id", detect)
 
-    assert cli.main(["--delay", "3"]) == 0
+    assert (
+        cli.main(["--delay", "3", "--active-app-command", "get-active-window-pid"]) == 0
+    )
 
-    assert events == ["countdown", "detect"]
+    assert events == [
+        "countdown",
+        "detect:get-active-window-pid",
+        "detect:get-active-window-pid",
+    ]
     assert service.requested_app_ids == ["steam"]
 
 
@@ -151,6 +171,12 @@ def test_cli_uses_the_first_match_uri_profile_when_actions_are_not_overridden(
     monkeypatch.setattr(
         cli, "authenticate_vault", lambda _client, *, email=None: service
     )
+
+    def resolve(explicit_app_id: str | None = None, **_: object) -> str:
+        return explicit_app_id or "steam"
+
+    monkeypatch.setattr(cli, "resolve_app_id", resolve)
+    monkeypatch.setattr(app_identity, "resolve_app_id", resolve)
     monkeypatch.setattr(cli, "create_input_adapter", lambda: input_adapter)
 
     assert cli.main(["--app-id", "steam", "--delay", "0"]) == 0
@@ -170,6 +196,78 @@ def test_cli_reports_unmapped_app_without_opening_input_backend(
     assert "No Bitwarden login" in capsys.readouterr().err
 
 
+def test_cli_aborts_when_focused_app_does_not_match_selected_app(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    service, input_adapter = setup_cli(monkeypatch)
+    monkeypatch.setattr(
+        cli,
+        "resolve_app_id",
+        lambda explicit_app_id=None, **_: explicit_app_id or "browser",
+    )
+    monkeypatch.setattr(
+        app_identity,
+        "resolve_app_id",
+        lambda explicit_app_id=None, **_: explicit_app_id or "browser",
+    )
+
+    assert cli.main(["--app-id", "steam", "--delay", "0"]) == 1
+
+    assert input_adapter.operations == []
+    assert service.closed
+    assert "focused application does not match" in capsys.readouterr().err
+
+
+def test_cli_requires_explicit_opt_in_for_an_unverified_target(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    service, input_adapter = setup_cli(monkeypatch)
+
+    def unavailable(explicit_app_id: str | None = None, **_: object) -> str:
+        if explicit_app_id:
+            return explicit_app_id
+        raise ActiveApplicationUnavailable("detector unavailable")
+
+    monkeypatch.setattr(cli, "resolve_app_id", unavailable)
+    monkeypatch.setattr(app_identity, "resolve_app_id", unavailable)
+
+    assert cli.main(["--app-id", "steam", "--delay", "0"]) == 1
+
+    assert input_adapter.operations == []
+    assert service.closed
+    assert "explicitly allow an unverified target" in capsys.readouterr().err
+
+
+def test_cli_warns_when_unverified_target_is_explicitly_allowed(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _service, input_adapter = setup_cli(monkeypatch)
+
+    def unavailable(explicit_app_id: str | None = None, **_: object) -> str:
+        if explicit_app_id:
+            return explicit_app_id
+        raise ActiveApplicationUnavailable("detector unavailable")
+
+    monkeypatch.setattr(cli, "resolve_app_id", unavailable)
+    monkeypatch.setattr(app_identity, "resolve_app_id", unavailable)
+
+    assert (
+        cli.main(
+            [
+                "--app-id",
+                "steam",
+                "--delay",
+                "0",
+                "--allow-unverified-target",
+            ]
+        )
+        == 0
+    )
+
+    assert input_adapter.operations == [("type", "test")]
+    assert "could not be verified" in capsys.readouterr().err
+
+
 def test_cli_handles_unsafe_or_unavailable_input_without_echoing_secrets(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -178,6 +276,12 @@ def test_cli_handles_unsafe_or_unavailable_input_without_echoing_secrets(
     monkeypatch.setattr(
         cli, "authenticate_vault", lambda _client, *, email=None: service
     )
+
+    def resolve(explicit_app_id: str | None = None, **_: object) -> str:
+        return explicit_app_id or "steam"
+
+    monkeypatch.setattr(cli, "resolve_app_id", resolve)
+    monkeypatch.setattr(app_identity, "resolve_app_id", resolve)
     monkeypatch.setattr(
         cli,
         "create_input_adapter",
@@ -189,7 +293,11 @@ def test_cli_handles_unsafe_or_unavailable_input_without_echoing_secrets(
         _app_id: str,
         _actions: Sequence[Action],
         adapter: InputAdapter,
+        *,
+        before_input: object = None,
     ) -> FillResult:
+        if callable(before_input):
+            before_input()
         adapter.type_text("trigger")
         raise AssertionError("Input adapter should have raised an error")
 
@@ -204,7 +312,7 @@ def test_cli_handles_unsafe_or_unavailable_input_without_echoing_secrets(
 def test_cli_sanitizes_cli_failures(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    def fail_resolve(_: str) -> str:
+    def fail_resolve(_: str, **_kwargs: object) -> str:
         raise BitwardenCLIError("safe failure")
 
     monkeypatch.setattr(

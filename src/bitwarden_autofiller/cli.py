@@ -21,6 +21,7 @@ from bitwarden_autofiller.daemon.remote import RemoteVaultService
 from bitwarden_autofiller.daemon.security import CredentialFileError, read_auth_token
 from bitwarden_autofiller.desktop.app_identity import (
     ActiveApplicationUnavailable,
+    ActiveApplicationVerifier,
     resolve_app_id,
 )
 from bitwarden_autofiller.desktop.platforms import (
@@ -58,6 +59,22 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Application ID used by the vault URI pcprocess://<app-id> "
             "(auto-detected where the compositor supports it)"
+        ),
+    )
+    parser.add_argument(
+        "--active-app-command",
+        metavar="COMMAND",
+        help=(
+            "Trusted shell command that prints the active window PID; its process "
+            "name is used as the app ID when auto-detecting"
+        ),
+    )
+    parser.add_argument(
+        "--allow-unverified-target",
+        action="store_true",
+        help=(
+            "Allow filling if active-window detection is unavailable; a warning "
+            "is printed before input"
         ),
     )
     parser.add_argument(
@@ -128,7 +145,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(build_app_uri(args.app_id, generated_actions))
             return 0
 
-        app_id = resolve_app_id(args.app_id) if args.app_id else None
+        app_id = (
+            resolve_app_id(args.app_id, active_app_command=args.active_app_command)
+            if args.app_id
+            else None
+        )
         actions = (
             parse_action_sequence(args.actions) if args.actions is not None else None
         )
@@ -156,7 +177,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
                 if args.delay:
                     time.sleep(args.delay)
-                app_id = resolve_app_id()
+                app_id = resolve_app_id(active_app_command=args.active_app_command)
             matches = service.list_matches(app_id)
             if not matches:
                 print(
@@ -176,13 +197,35 @@ def main(argv: Sequence[str] | None = None) -> int:
             else:
                 print(f"Found {len(matches)} matching login(s); sending input now.")
             adapter = LazyInputAdapter(create_input_adapter)
+            verifier = ActiveApplicationVerifier(
+                app_id,
+                active_app_command=args.active_app_command,
+                allow_unverified=args.allow_unverified_target,
+                on_unverified=lambda: print(
+                    "Warning: active application could not be verified; "
+                    "sending input to the focused window anyway.",
+                    file=sys.stderr,
+                ),
+            )
             try:
                 if actions is not None:
-                    result = fill_for_app(service, app_id, actions, adapter)
+                    result = fill_for_app(
+                        service,
+                        app_id,
+                        actions,
+                        adapter,
+                        before_input=verifier.verify,
+                    )
                 else:
                     profile_actions = profile_actions_for_uris(matches[0].uris, app_id)
                     if profile_actions is None:
-                        result = fill_for_app(service, app_id, DEFAULT_ACTIONS, adapter)
+                        result = fill_for_app(
+                            service,
+                            app_id,
+                            DEFAULT_ACTIONS,
+                            adapter,
+                            before_input=verifier.verify,
+                        )
                     else:
                         result = fill_selected_login(
                             service,
@@ -190,6 +233,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                             matches[0].id,
                             profile_actions,
                             adapter,
+                            before_input=verifier.verify,
                         )
             finally:
                 close = getattr(adapter, "close", None)

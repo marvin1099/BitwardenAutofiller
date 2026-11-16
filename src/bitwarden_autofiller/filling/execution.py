@@ -28,6 +28,7 @@ def execute_fill_actions(
     input_adapter: InputAdapter,
     *,
     totp_provider: TotpProvider | None = None,
+    before_input: Callable[[], None] | None = None,
 ) -> int:
     """Apply actions in order, fetching TOTP only when explicitly requested.
 
@@ -45,6 +46,7 @@ def execute_fill_actions(
             selected_value = totp_provider() if totp_provider is not None else None
         elif action is Action.TYPE:
             if selected_value:
+                _verify_before_input(input_adapter, before_input)
                 input_adapter.type_text(selected_value)
                 performed += 1
         elif action is Action.COPY:
@@ -52,9 +54,11 @@ def execute_fill_actions(
                 input_adapter.copy_text(selected_value)
                 performed += 1
         elif action is Action.ENTER:
+            _verify_before_input(input_adapter, before_input)
             input_adapter.press_key("Return")
             performed += 1
         elif action is Action.TAB:
+            _verify_before_input(input_adapter, before_input)
             input_adapter.press_key("Tab")
             performed += 1
         else:
@@ -62,3 +66,16 @@ def execute_fill_actions(
                 "Account navigation actions must be resolved before execution"
             )
     return performed
+
+
+def _verify_before_input(
+    input_adapter: InputAdapter, before_input: Callable[[], None] | None
+) -> None:
+    if before_input is None:
+        return
+    # Lazy desktop adapters may open a portal permission prompt while being
+    # initialized. Prepare first so focus is checked after that interaction.
+    prepare = getattr(input_adapter, "prepare", None)
+    if callable(prepare):
+        prepare()
+    before_input()

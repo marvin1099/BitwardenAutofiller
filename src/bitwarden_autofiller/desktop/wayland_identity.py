@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
-import json
 import select
-import tempfile
+import subprocess
+import sys
 import time
-import uuid
 from collections.abc import Callable, Sequence
 from importlib import import_module
 from pathlib import Path
@@ -110,151 +108,81 @@ def detect_wlr_active_app_id(
 
 
 def detect_kwin_active_app_id(*, timeout: float = _KWIN_TIMEOUT_SECONDS) -> str:
-    """Ask KWin's documented scripting API for its active window's app ID."""
+    """Get KWin's active process name, matching PyWinCtl's old app-name IDs.
+
+    ``kdotool`` exposes the active window PID through KWin's scripting API.
+    PyWinCtl's Linux ``getAppName()`` used that PID to read the process
+    ``comm`` name, so use the same value to keep existing ``pcprocess://``
+    mappings compatible. Fall back to KWin's window class when a window has no
+    readable PID.
+    """
+    process_id = _run_kdotool(("getactivewindow", "getwindowpid"), timeout=timeout)
     try:
-        from dbus_fast import Message, MessageType
-        from dbus_fast.aio import MessageBus
-    except ImportError as error:
-        raise RuntimeError(
-            "Install the optional Wayland detection dependencies"
-        ) from error
+        pid = int(process_id)
+    except ValueError:
+        pid = 0
 
-    return asyncio.run(
-        _detect_kwin_active_app_id(MessageBus, Message, MessageType, timeout)
+    if pid > 0:
+        app_name = process_name_for_pid(pid)
+        if app_name:
+            return app_name
+
+    window_class = _run_kdotool(
+        ("getactivewindow", "getwindowclassname"), timeout=timeout
     )
+    if window_class:
+        return window_class
+    raise RuntimeError("KWin did not report an active application name or class")
 
 
-async def _detect_kwin_active_app_id(
-    bus_factory: Callable[[], Any],
-    message_type: type[Any],
-    message_types: Any,
-    timeout: float,
-) -> str:
-    bus = await bus_factory().connect()
-    token = uuid.uuid4().hex
-    bus_name = f"org.bitwardenautofiller.ActiveApp.P{token}"
-    object_path = "/org/bitwardenautofiller/ActiveApp"
-    interface = "org.bitwardenautofiller.ActiveApp"
-    plugin_name = f"bitwarden_autofiller_{token}"
-    result: asyncio.Future[str] = asyncio.get_running_loop().create_future()
-    script_id: int | None = None
-    script_path: Path | None = None
-
-    def receive_app_id(message: Any) -> Any:
-        if (
-            message.message_type == message_types.METHOD_CALL
-            and message.path == object_path
-            and message.interface == interface
-            and message.member == "ReturnActiveAppId"
-            and message.signature == "s"
-            and len(message.body) == 1
-        ):
-            app_id = message.body[0]
-            if isinstance(app_id, str) and not result.done():
-                result.set_result(app_id)
-            return message_type.new_method_return(message)
-        return None
-
-    bus.add_message_handler(receive_app_id)
+def _run_kdotool(arguments: Sequence[str], *, timeout: float) -> str:
     try:
-        await asyncio.wait_for(bus.request_name(bus_name), timeout)
-        script = _kwin_detection_script(bus_name, object_path, interface)
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            prefix="bitwarden-autofiller-kwin-",
-            suffix=".js",
-            delete=False,
-        ) as script_file:
-            script_file.write(script)
-            script_path = Path(script_file.name)
-
-        load_reply = await _kwin_call(
-            bus,
-            message_type(
-                destination="org.kde.KWin",
-                path="/Scripting",
-                interface="org.kde.kwin.Scripting",
-                member="loadScript",
-                signature="ss",
-                body=[str(script_path), plugin_name],
-            ),
-            timeout,
-            message_types,
+        result = subprocess.run(
+            ["kdotool", *arguments],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
         )
-        script_id = int(load_reply.body[0])
-        if script_id < 0:
-            raise RuntimeError("KWin refused to load its active-window script")
+    except (OSError, subprocess.SubprocessError) as error:
+        raise RuntimeError("kdotool could not query KWin's active window") from error
+    return result.stdout.strip()
 
-        await _kwin_call(
-            bus,
-            message_type(
-                destination="org.kde.KWin",
-                path=f"/Scripting/Script{script_id}",
-                interface="org.kde.kwin.Script",
-                member="run",
-            ),
-            timeout,
-            message_types,
+
+def process_name_for_pid(pid: int, *, proc_root: Path = Path("/proc")) -> str:
+    """Return a process name for a PID, using the Linux-compatible name first."""
+    if pid <= 0:
+        return ""
+    try:
+        return (proc_root / str(pid) / "comm").read_text(encoding="utf-8").strip()
+    except OSError:
+        pass
+
+    try:
+        if sys.platform == "win32":
+            result = subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-Command",
+                    f"(Get-Process -Id {pid}).ProcessName",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=1.0,
+            )
+            return result.stdout.strip()
+        result = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "comm="],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=1.0,
         )
-        app_id = await asyncio.wait_for(result, timeout)
-        if not app_id.strip():
-            raise RuntimeError("KWin did not report an active application")
-        return app_id.strip()
-    finally:
-        if script_id is not None and script_id >= 0:
-            with contextlib.suppress(Exception):
-                await _kwin_call(
-                    bus,
-                    message_type(
-                        destination="org.kde.KWin",
-                        path=f"/Scripting/Script{script_id}",
-                        interface="org.kde.kwin.Script",
-                        member="stop",
-                    ),
-                    timeout,
-                    message_types,
-                )
-            with contextlib.suppress(Exception):
-                await _kwin_call(
-                    bus,
-                    message_type(
-                        destination="org.kde.KWin",
-                        path="/Scripting",
-                        interface="org.kde.kwin.Scripting",
-                        member="unloadScript",
-                        signature="s",
-                        body=[plugin_name],
-                    ),
-                    timeout,
-                    message_types,
-                )
-        if script_path is not None:
-            with contextlib.suppress(OSError):
-                script_path.unlink(missing_ok=True)
-        with contextlib.suppress(Exception):
-            bus.disconnect()
-
-
-async def _kwin_call(bus: Any, message: Any, timeout: float, message_types: Any) -> Any:
-    reply = await asyncio.wait_for(bus.call(message), timeout)
-    if reply.message_type == message_types.ERROR:
-        raise RuntimeError("KWin active-window query failed")
-    return reply
-
-
-def _kwin_detection_script(bus_name: str, object_path: str, interface: str) -> str:
-    """Create a one-shot script; its only output is the active app identity."""
-    return "\n".join(
-        (
-            "var active = workspace.activeWindow || workspace.activeClient;",
-            "var appId = active ? (active.resourceClass || "
-            "active.resourceName || active.desktopFileName || '') : '';",
-            "callDBus("
-            f"{json.dumps(bus_name)}, {json.dumps(object_path)}, "
-            f"{json.dumps(interface)}, 'ReturnActiveAppId', appId);",
-        )
-    )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return Path(result.stdout.strip()).name
 
 
 def _timed_roundtrip(display: Any, timeout: float) -> None:

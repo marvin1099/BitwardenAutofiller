@@ -1,5 +1,6 @@
 from collections.abc import Sequence
 
+from bitwarden_autofiller.desktop.platforms import LazyInputAdapter
 from bitwarden_autofiller.filling.actions import Action, parse_action_sequence
 from bitwarden_autofiller.filling.execution import execute_fill_actions
 from bitwarden_autofiller.vault.items import LoginCredentials
@@ -82,3 +83,71 @@ def test_missing_fields_do_not_emit_input_events() -> None:
         execute_fill_actions(LoginCredentials("login-1"), actions, input_adapter) == 0
     )
     assert input_adapter.operations == []
+
+
+def test_active_app_check_runs_immediately_before_each_input_operation() -> None:
+    events: list[str] = []
+
+    class OrderedInput(RecordingInput):
+        def type_text(self, text: str) -> None:
+            events.append("type")
+            super().type_text(text)
+
+        def press_key(self, key: str) -> None:
+            events.append("key")
+            super().press_key(key)
+
+    def verify_focus() -> None:
+        events.append("verify")
+
+    execute_fill_actions(
+        LoginCredentials("login-1", username="alice"),
+        parse_action_sequence("147"),
+        OrderedInput(),
+        before_input=verify_focus,
+    )
+
+    assert events == ["verify", "type", "verify", "key"]
+
+
+def test_clipboard_copy_does_not_require_active_window_verification() -> None:
+    input_adapter = RecordingInput()
+
+    def unexpected_verification() -> None:
+        raise AssertionError("Clipboard copies do not target the focused app")
+
+    execute_fill_actions(
+        LoginCredentials("login-1", username="alice"),
+        parse_action_sequence("15"),
+        input_adapter,
+        before_input=unexpected_verification,
+    )
+
+    assert input_adapter.operations == [("copy", "alice")]
+
+
+def test_lazy_input_backend_is_prepared_before_focus_verification() -> None:
+    events: list[str] = []
+
+    class PreparedInput:
+        def type_text(self, _text: str) -> None:
+            events.append("type")
+
+        def press_key(self, _key: str) -> None:
+            events.append("key")
+
+        def copy_text(self, _text: str) -> None:
+            events.append("copy")
+
+    def create_input() -> PreparedInput:
+        events.append("prepare")
+        return PreparedInput()
+
+    execute_fill_actions(
+        LoginCredentials("login-1", username="alice"),
+        parse_action_sequence("14"),
+        LazyInputAdapter(create_input),
+        before_input=lambda: events.append("verify"),
+    )
+
+    assert events == ["prepare", "verify", "type"]

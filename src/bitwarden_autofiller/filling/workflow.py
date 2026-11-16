@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -41,6 +41,8 @@ def fill_for_app(
     app_id: str,
     actions: Sequence[Action],
     input_adapter: InputAdapter,
+    *,
+    before_input: Callable[[], None] | None = None,
 ) -> FillResult:
     """Fill only explicitly mapped items, retrieving one item's secrets at a time."""
     matches = tuple(service.list_matches(app_id))
@@ -51,6 +53,7 @@ def fill_for_app(
         actions,
         input_adapter,
         matched_items=len(matches),
+        before_input=before_input,
     )
 
 
@@ -60,6 +63,8 @@ def fill_selected_login(
     item_id: str,
     actions: Sequence[Action],
     input_adapter: InputAdapter,
+    *,
+    before_input: Callable[[], None] | None = None,
 ) -> FillResult:
     """Fill one login only if it still matches the active application."""
     matches = tuple(service.list_matches(app_id))
@@ -73,6 +78,7 @@ def fill_selected_login(
         actions,
         input_adapter,
         matched_items=len(matches),
+        before_input=before_input,
     )
 
 
@@ -84,6 +90,7 @@ def _fill_matches(
     input_adapter: InputAdapter,
     *,
     matched_items: int,
+    before_input: Callable[[], None] | None,
 ) -> FillResult:
     groups = group_account_actions(actions, len(matches))
     selected_items = 0
@@ -106,6 +113,7 @@ def _fill_matches(
                 group.actions,
                 input_adapter,
                 totp_provider=get_totp,
+                before_input=before_input,
             )
             selected_items += 1
         finally:
