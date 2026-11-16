@@ -135,6 +135,35 @@ def detect_kwin_active_app_id(*, timeout: float = _KWIN_TIMEOUT_SECONDS) -> str:
     raise RuntimeError("KWin did not report an active application name or class")
 
 
+def detect_kwin_active_window_identity(
+    *, timeout: float = _KWIN_TIMEOUT_SECONDS
+) -> tuple[str, str]:
+    """Return KWin's active app ID and stable window UUID in one query."""
+    output = _run_kdotool(
+        (
+            "getactivewindow",
+            "getwindowid",
+            "getwindowpid",
+            "getwindowclassname",
+        ),
+        timeout=timeout,
+    )
+    fields = output.splitlines()
+    if len(fields) < 3 or not fields[0].strip():
+        raise RuntimeError("KWin did not report an active window identity")
+
+    window_id, process_id, window_class = (field.strip() for field in fields[:3])
+    try:
+        pid = int(process_id)
+    except ValueError:
+        pid = 0
+    app_id = process_name_for_pid(pid) if pid > 0 else ""
+    app_id = app_id or window_class
+    if not app_id:
+        raise RuntimeError("KWin did not report an active application name or class")
+    return app_id, window_id
+
+
 def _run_kdotool(arguments: Sequence[str], *, timeout: float) -> str:
     try:
         result = subprocess.run(

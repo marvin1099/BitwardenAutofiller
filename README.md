@@ -62,11 +62,14 @@ The configured command is tried first; if it fails, native detection is still
 attempted. Avoid putting credentials in the command: it is saved as a GUI
 setting or may be visible in CLI process arguments. Use `--help` for all options.
 
-Before sending fill input, the CLI and GUI re-check the focused application. A
-mismatch cancels the fill. If detection is unavailable, filling stops unless you
-explicitly enable **Allow fill if active app cannot be verified** in the GUI or
-pass `--allow-unverified-target` to the CLI. That override warns that input will
-go to whichever window has focus.
+Before each typing or key action, the CLI and GUI re-check the focused
+application. KWin and PyWinCtl also expose a window handle, which is pinned on
+the first check; a later change cancels the fill, even if the new window belongs
+to the same app. Compositors without stable window handles fall back to app-ID
+checks. If detection is unavailable, filling stops unless you explicitly enable
+**Allow fill if active app cannot be verified** in the GUI or pass
+`--allow-unverified-target` to the CLI. That override warns that input will go
+to whichever window has focus.
 
 In the GUI, connect to the vault and detect or enter the target application ID.
 Detection waits through a focus countdown on both X11 and Wayland. KDE uses

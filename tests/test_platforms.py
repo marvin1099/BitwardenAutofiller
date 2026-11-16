@@ -14,6 +14,8 @@ from bitwarden_autofiller.desktop import app_identity, platforms, wayland_identi
 from bitwarden_autofiller.desktop.app_identity import (
     ActiveApplicationUnavailable,
     ActiveApplicationVerifier,
+    ActiveWindowIdentity,
+    resolve_active_window_identity,
     resolve_app_id,
 )
 from bitwarden_autofiller.desktop.platforms import (
@@ -529,6 +531,40 @@ def test_kwin_detection_uses_process_name_for_pywinctl_compatibility(
     assert calls == [["kdotool", "getactivewindow", "getwindowpid"]]
 
 
+def test_kwin_window_detection_returns_app_id_and_window_uuid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commands: list[list[str]] = []
+
+    def fake_run(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout="kwin-window-42\n4242\norg.example.Game\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(
+        "bitwarden_autofiller.desktop.wayland_identity.subprocess.run", fake_run
+    )
+    monkeypatch.setattr(wayland_identity, "process_name_for_pid", lambda _: "game")
+
+    assert wayland_identity.detect_kwin_active_window_identity() == (
+        "game",
+        "kwin-window-42",
+    )
+    assert commands == [
+        [
+            "kdotool",
+            "getactivewindow",
+            "getwindowid",
+            "getwindowpid",
+            "getwindowclassname",
+        ]
+    ]
+
+
 def test_process_name_for_pid_reads_proc_comm(tmp_path: Path) -> None:
     process = tmp_path / "4242"
     process.mkdir()
@@ -674,6 +710,90 @@ def test_app_identity_uses_active_window_on_x11(
     assert resolve_app_id() == "Steam"
 
 
+def test_active_window_identity_uses_pywinctl_window_handle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window = SimpleNamespace(
+        getAppName=lambda: "Steam",
+        getHandle=lambda: 987654,
+    )
+    monkeypatch.setattr(
+        "bitwarden_autofiller.desktop.app_identity.sys.platform", "linux"
+    )
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    monkeypatch.setenv("XDG_SESSION_TYPE", "x11")
+    monkeypatch.setattr(
+        app_identity,
+        "import_module",
+        lambda _: SimpleNamespace(getActiveWindow=lambda: window),
+    )
+
+    assert resolve_active_window_identity() == ActiveWindowIdentity(
+        "Steam", "987654", "pywinctl"
+    )
+
+
+def test_active_window_identity_prefers_kwin_on_kde_wayland(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "bitwarden_autofiller.desktop.app_identity.sys.platform", "linux"
+    )
+    monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
+    monkeypatch.setenv("XDG_CURRENT_DESKTOP", "KDE")
+    monkeypatch.setattr(
+        app_identity,
+        "detect_kwin_active_window_identity",
+        lambda: ("steam", "kwin-window-7"),
+    )
+    monkeypatch.setattr(
+        app_identity,
+        "detect_wlr_active_app_id",
+        lambda: (_ for _ in ()).throw(AssertionError("KWin should be preferred")),
+    )
+
+    assert resolve_active_window_identity() == ActiveWindowIdentity(
+        "steam", "kwin-window-7", "kwin"
+    )
+
+
+def test_active_window_identity_falls_back_to_wlr_app_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "bitwarden_autofiller.desktop.app_identity.sys.platform", "linux"
+    )
+    monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
+    monkeypatch.setenv("XDG_CURRENT_DESKTOP", "KDE")
+    monkeypatch.setattr(
+        app_identity,
+        "detect_kwin_active_window_identity",
+        lambda: (_ for _ in ()).throw(RuntimeError("KWin unavailable")),
+    )
+    monkeypatch.setattr(
+        app_identity, "detect_wlr_active_app_id", lambda: "com.example.Game"
+    )
+
+    assert resolve_active_window_identity() == ActiveWindowIdentity("com.example.Game")
+
+
+def test_custom_app_command_identity_adds_native_window_handle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        app_identity, "_detect_app_id_from_command", lambda _command: "steam"
+    )
+    monkeypatch.setattr(
+        app_identity,
+        "_detect_native_window_handle",
+        lambda: ("window-9", "pywinctl"),
+    )
+
+    assert resolve_active_window_identity(active_app_command="pid-command") == (
+        ActiveWindowIdentity("steam", "window-9", "pywinctl")
+    )
+
+
 def test_custom_active_app_command_resolves_pid_to_compatible_process_name(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -754,7 +874,11 @@ def test_custom_active_app_command_failure_is_safe_when_native_detection_fails(
 def test_active_app_verifier_compares_normalized_ids(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(app_identity, "resolve_app_id", lambda **_: "Steam")
+    monkeypatch.setattr(
+        app_identity,
+        "resolve_active_window_identity",
+        lambda **_: ActiveWindowIdentity("Steam", "window-1", "test"),
+    )
     verifier = ActiveApplicationVerifier("pcprocess://steam?actions=14")
 
     verifier.verify()
@@ -765,20 +889,109 @@ def test_active_app_verifier_compares_normalized_ids(
 def test_active_app_verifier_cancels_when_focus_changes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(app_identity, "resolve_app_id", lambda **_: "browser")
+    monkeypatch.setattr(
+        app_identity,
+        "resolve_active_window_identity",
+        lambda **_: ActiveWindowIdentity("browser", "window-1", "test"),
+    )
     verifier = ActiveApplicationVerifier("steam")
 
     with pytest.raises(ActiveApplicationUnavailable, match="focused application"):
         verifier.verify()
 
 
+def test_active_app_verifier_cancels_when_same_app_window_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    identities = iter(
+        (
+            ActiveWindowIdentity("Steam", "window-1", "kwin"),
+            ActiveWindowIdentity("steam", "window-2", "kwin"),
+        )
+    )
+    monkeypatch.setattr(
+        app_identity,
+        "resolve_active_window_identity",
+        lambda **_: next(identities),
+    )
+    verifier = ActiveApplicationVerifier("steam")
+
+    verifier.verify()
+    with pytest.raises(ActiveApplicationUnavailable, match="focused window changed"):
+        verifier.verify()
+
+
+def test_active_app_verifier_falls_back_to_app_id_without_window_handle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        app_identity,
+        "resolve_active_window_identity",
+        lambda **_: ActiveWindowIdentity("steam"),
+    )
+    verifier = ActiveApplicationVerifier("steam")
+
+    verifier.verify()
+    verifier.verify()
+
+
+def test_missing_window_handle_after_capture_requires_opt_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    identities = iter(
+        (
+            ActiveWindowIdentity("steam", "window-1", "kwin"),
+            ActiveWindowIdentity("steam"),
+        )
+    )
+    monkeypatch.setattr(
+        app_identity,
+        "resolve_active_window_identity",
+        lambda **_: next(identities),
+    )
+    verifier = ActiveApplicationVerifier("steam")
+
+    verifier.verify()
+    with pytest.raises(ActiveApplicationUnavailable, match="same focused window"):
+        verifier.verify()
+
+
+def test_explicit_opt_in_continues_if_window_handle_detection_is_lost(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    identities = iter(
+        (
+            ActiveWindowIdentity("steam", "window-1", "kwin"),
+            ActiveWindowIdentity("steam"),
+        )
+    )
+    warnings: list[str] = []
+    monkeypatch.setattr(
+        app_identity,
+        "resolve_active_window_identity",
+        lambda **_: next(identities),
+    )
+    verifier = ActiveApplicationVerifier(
+        "steam", allow_unverified=True, on_unverified=lambda: warnings.append("warn")
+    )
+
+    verifier.verify()
+    verifier.verify()
+    verifier.verify()
+
+    assert verifier.unverified
+    assert warnings == ["warn"]
+
+
 def test_active_app_verifier_requires_opt_in_when_detection_is_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def unavailable(**_: object) -> str:
+    def unavailable_identity(**_: object) -> ActiveWindowIdentity:
         raise ActiveApplicationUnavailable("native detector unavailable")
 
-    monkeypatch.setattr(app_identity, "resolve_app_id", unavailable)
+    monkeypatch.setattr(
+        app_identity, "resolve_active_window_identity", unavailable_identity
+    )
     verifier = ActiveApplicationVerifier("steam")
     allowed_verifier = ActiveApplicationVerifier("steam", allow_unverified=True)
 

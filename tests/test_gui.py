@@ -13,7 +13,10 @@ from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QApplication, QLineEdit
 
 from bitwarden_autofiller.desktop import app_identity
-from bitwarden_autofiller.desktop.app_identity import ActiveApplicationUnavailable
+from bitwarden_autofiller.desktop.app_identity import (
+    ActiveApplicationUnavailable,
+    ActiveWindowIdentity,
+)
 from bitwarden_autofiller.desktop.gui import (
     AccountRow,
     BitwardenAutofillerWindow,
@@ -299,6 +302,11 @@ def test_gui_aborts_fill_if_focused_app_does_not_match(
         lambda explicit_app_id=None, **_: explicit_app_id or "browser",
     )
     monkeypatch.setattr(
+        app_identity,
+        "resolve_active_window_identity",
+        lambda **_: ActiveWindowIdentity("browser", "test-window", "test"),
+    )
+    monkeypatch.setattr(
         "bitwarden_autofiller.desktop.gui.create_input_adapter",
         lambda **_: RecordingInput(),
     )
@@ -355,8 +363,15 @@ def test_gui_requires_opt_in_and_warns_if_active_app_cannot_be_verified(
         verification_calls.append(active_app_command)
         raise ActiveApplicationUnavailable("detector unavailable")
 
+    def detect_identity(
+        *, active_app_command: str | None = None
+    ) -> ActiveWindowIdentity:
+        verification_calls.append(active_app_command)
+        raise ActiveApplicationUnavailable("detector unavailable")
+
     monkeypatch.setattr("bitwarden_autofiller.desktop.gui.resolve_app_id", detect)
     monkeypatch.setattr(app_identity, "resolve_app_id", detect)
+    monkeypatch.setattr(app_identity, "resolve_active_window_identity", detect_identity)
     monkeypatch.setattr(
         "bitwarden_autofiller.desktop.gui.create_input_adapter",
         lambda **_: RecordingInput(),

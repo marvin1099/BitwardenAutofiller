@@ -4,7 +4,10 @@ import pytest
 
 from bitwarden_autofiller import cli
 from bitwarden_autofiller.desktop import app_identity
-from bitwarden_autofiller.desktop.app_identity import ActiveApplicationUnavailable
+from bitwarden_autofiller.desktop.app_identity import (
+    ActiveApplicationUnavailable,
+    ActiveWindowIdentity,
+)
 from bitwarden_autofiller.desktop.platforms import InputBackendError
 from bitwarden_autofiller.filling.actions import Action
 from bitwarden_autofiller.filling.execution import InputAdapter, PartialFillError
@@ -72,6 +75,11 @@ def setup_cli(
 
     monkeypatch.setattr(cli, "resolve_app_id", resolve)
     monkeypatch.setattr(app_identity, "resolve_app_id", resolve)
+    monkeypatch.setattr(
+        app_identity,
+        "resolve_active_window_identity",
+        lambda **_: ActiveWindowIdentity("steam", "test-window", "test"),
+    )
 
     def fake_fill(
         _service: object,
@@ -148,6 +156,14 @@ def test_cli_detects_active_app_after_the_focus_countdown(
     monkeypatch.setattr(cli, "resolve_app_id", detect)
     monkeypatch.setattr(app_identity, "resolve_app_id", detect)
 
+    def detect_identity(
+        *, active_app_command: str | None = None
+    ) -> ActiveWindowIdentity:
+        events.append(f"detect:{active_app_command}")
+        return ActiveWindowIdentity("steam", "test-window", "test")
+
+    monkeypatch.setattr(app_identity, "resolve_active_window_identity", detect_identity)
+
     assert (
         cli.main(["--delay", "3", "--active-app-command", "get-active-window-pid"]) == 0
     )
@@ -177,6 +193,11 @@ def test_cli_uses_the_first_match_uri_profile_when_actions_are_not_overridden(
 
     monkeypatch.setattr(cli, "resolve_app_id", resolve)
     monkeypatch.setattr(app_identity, "resolve_app_id", resolve)
+    monkeypatch.setattr(
+        app_identity,
+        "resolve_active_window_identity",
+        lambda **_: ActiveWindowIdentity("steam", "test-window", "test"),
+    )
     monkeypatch.setattr(cli, "create_input_adapter", lambda: input_adapter)
 
     assert cli.main(["--app-id", "steam", "--delay", "0"]) == 0
@@ -210,6 +231,11 @@ def test_cli_aborts_when_focused_app_does_not_match_selected_app(
         "resolve_app_id",
         lambda explicit_app_id=None, **_: explicit_app_id or "browser",
     )
+    monkeypatch.setattr(
+        app_identity,
+        "resolve_active_window_identity",
+        lambda **_: ActiveWindowIdentity("browser", "test-window", "test"),
+    )
 
     assert cli.main(["--app-id", "steam", "--delay", "0"]) == 1
 
@@ -230,6 +256,13 @@ def test_cli_requires_explicit_opt_in_for_an_unverified_target(
 
     monkeypatch.setattr(cli, "resolve_app_id", unavailable)
     monkeypatch.setattr(app_identity, "resolve_app_id", unavailable)
+    monkeypatch.setattr(
+        app_identity,
+        "resolve_active_window_identity",
+        lambda **_: (_ for _ in ()).throw(
+            ActiveApplicationUnavailable("detector unavailable")
+        ),
+    )
 
     assert cli.main(["--app-id", "steam", "--delay", "0"]) == 1
 
@@ -250,6 +283,13 @@ def test_cli_warns_when_unverified_target_is_explicitly_allowed(
 
     monkeypatch.setattr(cli, "resolve_app_id", unavailable)
     monkeypatch.setattr(app_identity, "resolve_app_id", unavailable)
+    monkeypatch.setattr(
+        app_identity,
+        "resolve_active_window_identity",
+        lambda **_: (_ for _ in ()).throw(
+            ActiveApplicationUnavailable("detector unavailable")
+        ),
+    )
 
     assert (
         cli.main(
@@ -308,6 +348,11 @@ def test_cli_handles_unsafe_or_unavailable_input_without_echoing_secrets(
 
     monkeypatch.setattr(cli, "resolve_app_id", resolve)
     monkeypatch.setattr(app_identity, "resolve_app_id", resolve)
+    monkeypatch.setattr(
+        app_identity,
+        "resolve_active_window_identity",
+        lambda **_: ActiveWindowIdentity("steam", "test-window", "test"),
+    )
     monkeypatch.setattr(
         cli,
         "create_input_adapter",
