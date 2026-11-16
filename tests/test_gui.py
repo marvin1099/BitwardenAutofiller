@@ -14,9 +14,14 @@ from PySide6.QtWidgets import QApplication, QLineEdit
 
 from bitwarden_autofiller.desktop import app_identity
 from bitwarden_autofiller.desktop.app_identity import ActiveApplicationUnavailable
-from bitwarden_autofiller.desktop.gui import AccountRow, BitwardenAutofillerWindow
+from bitwarden_autofiller.desktop.gui import (
+    AccountRow,
+    BitwardenAutofillerWindow,
+    _OperationWorker,
+)
 from bitwarden_autofiller.desktop.platforms import InputBackendError
 from bitwarden_autofiller.filling.actions import parse_action_sequence
+from bitwarden_autofiller.filling.execution import PartialFillError
 from bitwarden_autofiller.vault.items import LoginCredentials, LoginSummary
 
 
@@ -380,6 +385,17 @@ def test_gui_requires_opt_in_and_warns_if_active_app_cannot_be_verified(
     window._service = None
     window.close()
     app.processEvents()
+
+
+def test_gui_shows_partial_fill_warning_instead_of_generic_error() -> None:
+    worker = _OperationWorker(lambda: (_ for _ in ()).throw(PartialFillError(1, 1)))
+    errors: list[str] = []
+    worker.failed.connect(errors.append)
+
+    worker.run()
+
+    assert len(errors) == 1
+    assert "Earlier fields or clipboard contents may have changed" in errors[0]
 
 
 def test_fill_button_reports_invalid_action_sequences_without_starting_work(

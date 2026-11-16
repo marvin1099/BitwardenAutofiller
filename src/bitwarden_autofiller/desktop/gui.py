@@ -44,6 +44,7 @@ from bitwarden_autofiller.filling.actions import (
     Action,
     parse_action_sequence,
 )
+from bitwarden_autofiller.filling.execution import PartialFillError
 from bitwarden_autofiller.filling.workflow import (
     FillResult,
     FillService,
@@ -90,6 +91,7 @@ class _OperationWorker(QObject):
                     AuthenticationError,
                     BitwardenCLIError,
                     InputBackendError,
+                    PartialFillError,
                     ValueError,
                 ),
             ):

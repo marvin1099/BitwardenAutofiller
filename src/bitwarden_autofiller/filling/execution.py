@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from functools import partial
 from typing import Protocol
 
 from bitwarden_autofiller.filling.actions import Action
@@ -22,6 +23,27 @@ class InputAdapter(Protocol):
 TotpProvider = Callable[[], str]
 
 
+class PartialFillError(RuntimeError):
+    """An input sequence stopped after some fill actions may have completed."""
+
+    def __init__(self, completed_operations: int, attempted_operations: int) -> None:
+        self.completed_operations = completed_operations
+        self.attempted_operations = attempted_operations
+        if completed_operations == 0 and attempted_operations == 0:
+            message = "Autofill was cancelled before input was sent."
+        else:
+            message = (
+                "Autofill stopped after "
+                f"{completed_operations} completed input operation(s)."
+            )
+            if attempted_operations > completed_operations:
+                message += " The current operation may be partially applied."
+            if completed_operations:
+                message += " Earlier fields or clipboard contents may have changed."
+            message += " Check the target before retrying."
+        super().__init__(message)
+
+
 def execute_fill_actions(
     credentials: LoginCredentials,
     actions: Sequence[Action],
@@ -37,6 +59,26 @@ def execute_fill_actions(
     """
     selected_value: str | None = None
     performed = 0
+    attempted = 0
+
+    def perform_input(
+        operation: Callable[[], None], *, verify_focus: bool = True
+    ) -> None:
+        nonlocal attempted, performed
+        if verify_focus:
+            try:
+                _verify_before_input(input_adapter, before_input)
+            except Exception as error:
+                if performed:
+                    raise PartialFillError(performed, attempted) from error
+                raise
+        attempted += 1
+        try:
+            operation()
+        except Exception as error:
+            raise PartialFillError(performed, attempted) from error
+        performed += 1
+
     for action in actions:
         if action is Action.USERNAME:
             selected_value = credentials.username
@@ -46,21 +88,17 @@ def execute_fill_actions(
             selected_value = totp_provider() if totp_provider is not None else None
         elif action is Action.TYPE:
             if selected_value:
-                _verify_before_input(input_adapter, before_input)
-                input_adapter.type_text(selected_value)
-                performed += 1
+                perform_input(partial(input_adapter.type_text, selected_value))
         elif action is Action.COPY:
             if selected_value:
-                input_adapter.copy_text(selected_value)
-                performed += 1
+                perform_input(
+                    partial(input_adapter.copy_text, selected_value),
+                    verify_focus=False,
+                )
         elif action is Action.ENTER:
-            _verify_before_input(input_adapter, before_input)
-            input_adapter.press_key("Return")
-            performed += 1
+            perform_input(lambda: input_adapter.press_key("Return"))
         elif action is Action.TAB:
-            _verify_before_input(input_adapter, before_input)
-            input_adapter.press_key("Tab")
-            performed += 1
+            perform_input(lambda: input_adapter.press_key("Tab"))
         else:
             raise ValueError(
                 "Account navigation actions must be resolved before execution"

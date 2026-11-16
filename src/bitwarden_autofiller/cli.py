@@ -30,6 +30,7 @@ from bitwarden_autofiller.desktop.platforms import (
     create_input_adapter,
 )
 from bitwarden_autofiller.filling.actions import DEFAULT_ACTIONS, parse_action_sequence
+from bitwarden_autofiller.filling.execution import PartialFillError
 from bitwarden_autofiller.filling.workflow import (
     FillService,
     fill_for_app,
@@ -253,6 +254,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         CredentialFileError,
         DaemonRequestError,
         InputBackendError,
+        PartialFillError,
         ValueError,
         OSError,
     ) as error:

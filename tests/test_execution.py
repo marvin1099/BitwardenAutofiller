@@ -1,8 +1,13 @@
 from collections.abc import Sequence
 
+import pytest
+
 from bitwarden_autofiller.desktop.platforms import LazyInputAdapter
 from bitwarden_autofiller.filling.actions import Action, parse_action_sequence
-from bitwarden_autofiller.filling.execution import execute_fill_actions
+from bitwarden_autofiller.filling.execution import (
+    PartialFillError,
+    execute_fill_actions,
+)
 from bitwarden_autofiller.vault.items import LoginCredentials
 
 
@@ -151,3 +156,45 @@ def test_lazy_input_backend_is_prepared_before_focus_verification() -> None:
     )
 
     assert events == ["prepare", "verify", "type"]
+
+
+def test_focus_change_after_input_reports_that_fill_may_be_partial() -> None:
+    input_adapter = RecordingInput()
+    checks = 0
+
+    def verify_focus() -> None:
+        nonlocal checks
+        checks += 1
+        if checks == 2:
+            raise RuntimeError("focus changed")
+
+    with pytest.raises(PartialFillError) as raised:
+        execute_fill_actions(
+            LoginCredentials("login-1", username="alice"),
+            parse_action_sequence("147"),
+            input_adapter,
+            before_input=verify_focus,
+        )
+
+    assert raised.value.completed_operations == 1
+    assert raised.value.attempted_operations == 1
+    assert "Earlier fields" in str(raised.value)
+    assert "Check the target before retrying" in str(raised.value)
+    assert input_adapter.operations == [("type", "alice")]
+
+
+def test_first_focus_check_failure_does_not_claim_input_was_sent() -> None:
+    input_adapter = RecordingInput()
+
+    def unavailable() -> None:
+        raise RuntimeError("active app unavailable")
+
+    with pytest.raises(RuntimeError, match="active app unavailable"):
+        execute_fill_actions(
+            LoginCredentials("login-1", username="alice"),
+            parse_action_sequence("14"),
+            input_adapter,
+            before_input=unavailable,
+        )
+
+    assert input_adapter.operations == []

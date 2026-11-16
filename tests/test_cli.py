@@ -7,7 +7,7 @@ from bitwarden_autofiller.desktop import app_identity
 from bitwarden_autofiller.desktop.app_identity import ActiveApplicationUnavailable
 from bitwarden_autofiller.desktop.platforms import InputBackendError
 from bitwarden_autofiller.filling.actions import Action
-from bitwarden_autofiller.filling.execution import InputAdapter
+from bitwarden_autofiller.filling.execution import InputAdapter, PartialFillError
 from bitwarden_autofiller.filling.workflow import FillResult
 from bitwarden_autofiller.vault.bitwarden import BitwardenCLIError
 from bitwarden_autofiller.vault.items import LoginSummary
@@ -266,6 +266,32 @@ def test_cli_warns_when_unverified_target_is_explicitly_allowed(
 
     assert input_adapter.operations == [("type", "test")]
     assert "could not be verified" in capsys.readouterr().err
+
+
+def test_cli_reports_when_a_fill_may_be_partial(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    service, _input_adapter = setup_cli(monkeypatch)
+
+    def partial_fill(
+        _service: object,
+        _app_id: str,
+        _actions: Sequence[Action],
+        _adapter: InputAdapter,
+        *,
+        before_input: object = None,
+    ) -> FillResult:
+        del before_input
+        raise PartialFillError(1, 1)
+
+    monkeypatch.setattr(cli, "fill_for_app", partial_fill)
+
+    assert cli.main(["--app-id", "steam", "--delay", "0"]) == 1
+
+    assert service.closed
+    assert "Earlier fields or clipboard contents may have changed" in (
+        capsys.readouterr().err
+    )
 
 
 def test_cli_handles_unsafe_or_unavailable_input_without_echoing_secrets(
