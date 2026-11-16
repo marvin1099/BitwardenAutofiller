@@ -11,7 +11,7 @@ _LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
 
 def configure_logging(level: str | None = None) -> None:
     """Configure stderr logging without including vault or credential data."""
-    selected = level or os.environ.get("BITWARDEN_AUTOFILLER_LOG_LEVEL", "WARNING")
+    selected = level or os.environ.get("BITWARDEN_AUTOFILLER_LOG_LEVEL", "INFO")
     selected = selected.upper()
     if selected not in _LEVELS:
         selected = "WARNING"

@@ -12,6 +12,7 @@ from PySide6.QtCore import QObject, QSettings, QThread, QTimer, Signal, Slot
 from PySide6.QtGui import QCloseEvent, QGuiApplication, QIcon
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -19,28 +20,44 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
-from bitwarden_autofiller.desktop.app_identity import resolve_app_id
+from bitwarden_autofiller.app_uri import build_app_uri, profile_actions_for_uris
+from bitwarden_autofiller.desktop.app_identity import (
+    ActiveApplicationUnavailable,
+    resolve_app_id,
+)
 from bitwarden_autofiller.desktop.platforms import (
     InputBackendError,
     LazyInputAdapter,
     create_input_adapter,
 )
-from bitwarden_autofiller.filling.actions import Action, parse_action_sequence
-from bitwarden_autofiller.filling.workflow import FillResult, fill_for_app
+from bitwarden_autofiller.filling.actions import (
+    DEFAULT_ACTIONS,
+    Action,
+    parse_action_sequence,
+)
+from bitwarden_autofiller.filling.workflow import (
+    FillResult,
+    FillService,
+    fill_for_app,
+    fill_selected_login,
+)
 from bitwarden_autofiller.logging_config import configure_logging
 from bitwarden_autofiller.vault.authentication import (
     AuthenticationError,
     authenticate_vault,
 )
 from bitwarden_autofiller.vault.bitwarden import BitwardenCLI, BitwardenCLIError
+from bitwarden_autofiller.vault.items import LoginSummary
 from bitwarden_autofiller.vault.service import VaultService
 
 _LOGGER = logging.getLogger(__name__)
+APP_DETECTION_MINIMUM_SECONDS = 3
 
 
 class _OperationWorker(QObject):
@@ -59,7 +76,13 @@ class _OperationWorker(QObject):
             _LOGGER.warning("GUI operation failed (%s)", type(error).__name__)
             if isinstance(
                 error,
-                (AuthenticationError, BitwardenCLIError, InputBackendError, ValueError),
+                (
+                    ActiveApplicationUnavailable,
+                    AuthenticationError,
+                    BitwardenCLIError,
+                    InputBackendError,
+                    ValueError,
+                ),
             ):
                 message = str(error)
             else:
@@ -69,6 +92,42 @@ class _OperationWorker(QObject):
             self.failed.emit(message)
         else:
             self.completed.emit(result)
+
+
+class AccountRow(QWidget):
+    """A non-secret account label with explicit per-account actions."""
+
+    action_requested = Signal(str, str)
+
+    def __init__(self, summary: LoginSummary, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.item_id = summary.id
+        self.name_label = QLabel(summary.name)
+        self.name_label.setObjectName("accountNameLabel")
+        self.name_label.setWordWrap(True)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(4, 3, 4, 3)
+        layout.addWidget(self.name_label, 1)
+        self.autofill_button = self._add_action(layout, "Autofill", "autofill")
+        self.copy_username_button = self._add_action(
+            layout, "Copy username", "copy_username"
+        )
+        self.copy_password_button = self._add_action(
+            layout, "Copy password", "copy_password"
+        )
+        self.copy_totp_button = self._add_action(layout, "Copy TOTP", "copy_totp")
+
+    def _add_action(self, layout: QHBoxLayout, label: str, action: str) -> QPushButton:
+        button = QPushButton(label)
+        button.setObjectName(f"account_{action}_button")
+        button.clicked.connect(
+            lambda _checked=False, operation=action: self.action_requested.emit(
+                self.item_id, operation
+            )
+        )
+        layout.addWidget(button)
+        return button
 
 
 class BitwardenAutofillerWindow(QMainWindow):
@@ -89,6 +148,13 @@ class BitwardenAutofillerWindow(QMainWindow):
         self._thread: QThread | None = None
         self._worker: _OperationWorker | None = None
         self._busy = False
+        self._matches: tuple[LoginSummary, ...] = ()
+        self._loaded_app_id: str | None = None
+        self._account_rows: dict[str, AccountRow] = {}
+        self._pending_fill_item_id: str | None = None
+        self._pending_fill_actions: tuple[Action, ...] | None = None
+        self._pending_fill_app_id: str | None = None
+        self._pending_app_detection = False
         self._countdown_timer = QTimer(self)
         self._countdown_timer.setInterval(1000)
         self._countdown_timer.timeout.connect(self._countdown_tick)
@@ -98,8 +164,8 @@ class BitwardenAutofillerWindow(QMainWindow):
         icon_path = Path(__file__).with_name("fillericon.png")
         if icon_path.is_file():
             self.setWindowIcon(QIcon(str(icon_path)))
-        self.setMinimumSize(520, 390)
-        self.resize(600, 460)
+        self.setMinimumSize(680, 540)
+        self.resize(900, 720)
         self.clipboard_requested.connect(self._copy_to_clipboard)
         self._build_ui()
         self._restore_settings()
@@ -144,22 +210,75 @@ class BitwardenAutofillerWindow(QMainWindow):
         fill_form = QFormLayout(fill_box)
         self.app_id_edit = QLineEdit()
         self.app_id_edit.setObjectName("appIdEdit")
-        self.app_id_edit.setPlaceholderText("e.g. steam (maps pcprocess://steam)")
+        self.app_id_edit.setPlaceholderText(
+            "e.g. steam or pcprocess://steam (Wayland: enter explicitly)"
+        )
         self.actions_edit = QLineEdit("C14724635")
         self.actions_edit.setObjectName("fillActionsEdit")
         self.actions_edit.setToolTip(
             "1=username, 2=password, 3=current TOTP, 4=type, 5=copy, "
             "6=Enter, 7=Tab, A/B=next/previous, C/D=first/last login"
         )
+        self.prefer_uri_profile_check = QCheckBox(
+            "Use account URI actions when available"
+        )
+        self.prefer_uri_profile_check.setObjectName("preferUriProfileCheck")
+        self.prefer_uri_profile_check.setChecked(True)
         self.delay_spin = QSpinBox()
         self.delay_spin.setObjectName("focusDelaySpin")
         self.delay_spin.setRange(0, 15)
         self.delay_spin.setValue(3)
         self.delay_spin.setSuffix(" s")
+        app_buttons = QHBoxLayout()
+        self.detect_app_button = QPushButton("Detect active app")
+        self.detect_app_button.setObjectName("detectAppButton")
+        self.refresh_accounts_button = QPushButton("Load accounts")
+        self.refresh_accounts_button.setObjectName("loadAccountsButton")
+        self.refresh_accounts_button.setEnabled(False)
+        app_buttons.addWidget(self.detect_app_button)
+        app_buttons.addWidget(self.refresh_accounts_button)
+        app_buttons.addStretch(1)
         fill_form.addRow("Application ID", self.app_id_edit)
+        fill_form.addRow(app_buttons)
         fill_form.addRow("Actions", self.actions_edit)
+        fill_form.addRow("Profile", self.prefer_uri_profile_check)
         fill_form.addRow("Focus delay", self.delay_spin)
+
+        self.generated_uri_edit = QLineEdit()
+        self.generated_uri_edit.setObjectName("generatedUriEdit")
+        self.generated_uri_edit.setReadOnly(True)
+        self.generated_uri_edit.setPlaceholderText("Generated mapping URI appears here")
+        uri_buttons = QHBoxLayout()
+        self.generate_uri_button = QPushButton("Generate mapping URI")
+        self.generate_uri_button.setObjectName("generateUriButton")
+        self.copy_uri_button = QPushButton("Copy URI")
+        self.copy_uri_button.setObjectName("copyUriButton")
+        self.copy_uri_button.setEnabled(False)
+        uri_buttons.addWidget(self.generate_uri_button)
+        uri_buttons.addWidget(self.copy_uri_button)
+        uri_buttons.addStretch(1)
+        fill_form.addRow("Bitwarden URI", self.generated_uri_edit)
+        fill_form.addRow(uri_buttons)
         layout.addWidget(fill_box)
+
+        accounts_box = QGroupBox("Accounts mapped to this application")
+        accounts_layout = QVBoxLayout(accounts_box)
+        self.accounts_status_label = QLabel(
+            "Connect to the vault and load accounts for an application."
+        )
+        self.accounts_status_label.setObjectName("accountsStatusLabel")
+        accounts_layout.addWidget(self.accounts_status_label)
+        self.accounts_scroll = QScrollArea()
+        self.accounts_scroll.setObjectName("accountsScrollArea")
+        self.accounts_scroll.setWidgetResizable(True)
+        self.accounts_scroll.setMinimumHeight(120)
+        self.accounts_content = QWidget()
+        self.accounts_rows_layout = QVBoxLayout(self.accounts_content)
+        self.accounts_rows_layout.setContentsMargins(2, 2, 2, 2)
+        self.accounts_rows_layout.setSpacing(2)
+        self.accounts_scroll.setWidget(self.accounts_content)
+        accounts_layout.addWidget(self.accounts_scroll)
+        layout.addWidget(accounts_box, 1)
 
         buttons = QHBoxLayout()
         self.connect_button = QPushButton("Connect to vault")
@@ -187,12 +306,24 @@ class BitwardenAutofillerWindow(QMainWindow):
         self.connect_button.clicked.connect(self._connect_to_vault)
         self.disconnect_button.clicked.connect(self._disconnect_from_vault)
         self.fill_button.clicked.connect(self._start_fill_countdown)
+        self.detect_app_button.clicked.connect(self._start_app_detection)
+        self.refresh_accounts_button.clicked.connect(self._load_accounts)
+        self.app_id_edit.returnPressed.connect(self._load_accounts)
+        self.generate_uri_button.clicked.connect(self._generate_uri)
+        self.copy_uri_button.clicked.connect(self._copy_generated_uri)
 
     def _restore_settings(self) -> None:
         self.email_edit.setText(str(self._settings.value("email", "")))
         self.app_id_edit.setText(str(self._settings.value("app_id", "")))
         self.actions_edit.setText(str(self._settings.value("actions", "C14724635")))
         self.bw_path_edit.setText(str(self._settings.value("bw_path", "bw")))
+        prefer_profile = self._settings.value("prefer_uri_profile", True)
+        if isinstance(prefer_profile, bool):
+            self.prefer_uri_profile_check.setChecked(prefer_profile)
+        else:
+            self.prefer_uri_profile_check.setChecked(
+                str(prefer_profile).casefold() not in {"0", "false", "no"}
+            )
 
     def _connect_to_vault(self) -> None:
         email = self.email_edit.text().strip() or None
@@ -218,35 +349,198 @@ class BitwardenAutofillerWindow(QMainWindow):
         if self._service is not None:
             self._service.close()
         self._service = service
-        self.status_label.setText("Connected. Enter an app ID and choose Fill now.")
-        self.fill_button.setEnabled(True)
-        self.disconnect_button.setEnabled(True)
+        self.status_label.setText("Connected. Detect or enter the target app ID.")
         self._set_busy(False)
+        thread = self._thread
+        if thread is not None and thread.isRunning():
+            thread.finished.connect(self._select_target_after_connection)
+        else:
+            self._select_target_after_connection()
+
+    def _select_target_after_connection(self) -> None:
+        if self._service is None:
+            return
+        if self.app_id_edit.text().strip():
+            self._load_accounts()
+        else:
+            self._start_app_detection()
+
+    def _start_app_detection(self) -> None:
+        if self._busy:
+            return
+        self._pending_app_detection = True
+        self._countdown = max(APP_DETECTION_MINIMUM_SECONDS, self.delay_spin.value())
+        self._set_busy(True)
+        self.status_label.setText(
+            "Switch to the target application; detecting it in "
+            f"{self._countdown} seconds…"
+        )
+        self._countdown_timer.start()
+
+    def _detect_current_app_now(self) -> None:
+        self.status_label.setText("Detecting the active application…")
+        self._set_busy(True)
+        self._start_worker(resolve_app_id, self._active_app_detected)
+
+    def _active_app_detected(self, app_id: str) -> None:
+        self.app_id_edit.setText(app_id)
+        if self._service is not None:
+            self.status_label.setText("Detected app ID. Loading mapped accounts…")
+        else:
+            self.status_label.setText("Detected app ID.")
+        thread = self._thread
+        service = self._service
+        self._set_busy(False)
+        if service is None:
+            return
+        if thread is not None and thread.isRunning():
+            thread.finished.connect(self._load_accounts)
+        else:
+            self._load_accounts()
+
+    def _load_accounts(self) -> None:
+        service = self._service
+        if service is None:
+            self.status_label.setText("Connect to the vault before loading accounts.")
+            return
+        try:
+            app_id = self._current_app_id()
+        except (RuntimeError, ValueError) as error:
+            self.status_label.setText(str(error))
+            return
+
+        self.accounts_status_label.setText("Loading mapped accounts…")
+        self.status_label.setText("Checking Bitwarden mappings…")
+        self._set_busy(True)
+        self._start_worker(
+            lambda: tuple(service.list_matches(app_id)),
+            lambda matches: self._accounts_loaded(app_id, matches),
+        )
+
+    def _accounts_loaded(self, app_id: str, matches: Sequence[LoginSummary]) -> None:
+        self._matches = tuple(matches)
+        self._loaded_app_id = app_id
+        self._clear_account_rows()
+        for summary in self._matches:
+            row = AccountRow(summary, self.accounts_content)
+            row.action_requested.connect(self._account_action_requested)
+            self._account_rows[summary.id] = row
+            self.accounts_rows_layout.addWidget(row)
+        self.accounts_rows_layout.addStretch(1)
+        self.accounts_status_label.setText(
+            f"{len(self._matches)} account(s) mapped to {app_id}. "
+            "Choose an action on an account."
+            if self._matches
+            else f"No accounts are mapped to {app_id}."
+        )
+        self.status_label.setText("Mapped accounts refreshed.")
+        self._set_busy(False)
+
+    def _clear_account_rows(self) -> None:
+        while self.accounts_rows_layout.count():
+            item = self.accounts_rows_layout.takeAt(0)
+            if item is None:
+                continue
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        self._account_rows.clear()
+
+    def _generate_uri(self) -> None:
+        try:
+            app_id = self._current_app_id()
+            actions = parse_action_sequence(self.actions_edit.text())
+            uri = build_app_uri(app_id, actions)
+        except (RuntimeError, ValueError) as error:
+            self.status_label.setText(str(error))
+            return
+        self.generated_uri_edit.setText(uri)
+        self.copy_uri_button.setEnabled(True)
+        self.status_label.setText("Generated a Bitwarden application mapping URI.")
+
+    def _copy_generated_uri(self) -> None:
+        uri = self.generated_uri_edit.text()
+        if uri:
+            self.clipboard_requested.emit(uri)
+            self.status_label.setText("Copied the mapping URI to the clipboard.")
 
     def _disconnect_from_vault(self) -> None:
         if self._service is not None:
             self._service.close()
             self._service = None
-        self.fill_button.setEnabled(False)
-        self.disconnect_button.setEnabled(False)
+        self._matches = ()
+        self._loaded_app_id = None
+        self._clear_account_rows()
+        self.accounts_status_label.setText("Connect to the vault to load accounts.")
         self.status_label.setText("Disconnected. No vault session is active.")
+        self._refresh_buttons()
 
     def _start_fill_countdown(self) -> None:
         if self._service is None:
             self.status_label.setText("Connect to the vault first.")
             return
         try:
-            self._current_app_id()
-            actions = parse_action_sequence(self.actions_edit.text())
+            app_id = self._current_app_id()
         except (ValueError, RuntimeError) as error:
             self.status_label.setText(str(error))
             return
 
+        if self._loaded_app_id != app_id:
+            self.status_label.setText("Load the mapped accounts before filling.")
+            self._load_accounts()
+            return
+        if not self._matches:
+            self.status_label.setText("No Bitwarden login is mapped to this app ID.")
+            return
+
+        first_match = self._matches[0]
+        try:
+            profile_actions = (
+                profile_actions_for_uris(first_match.uris, app_id)
+                if self.prefer_uri_profile_check.isChecked()
+                else None
+            )
+        except ValueError as error:
+            self.status_label.setText(str(error))
+            return
+        if profile_actions is not None:
+            self._queue_fill(first_match.id, profile_actions, app_id)
+            return
+        actions_text = self.actions_edit.text().strip()
+        try:
+            actions = (
+                parse_action_sequence(actions_text) if actions_text else DEFAULT_ACTIONS
+            )
+        except ValueError as error:
+            self.status_label.setText(str(error))
+            return
+        self._queue_fill(None, actions, app_id)
+
+    def _actions_for_account(
+        self, summary: LoginSummary, app_id: str
+    ) -> tuple[Action, ...]:
+        if self.prefer_uri_profile_check.isChecked():
+            profile_actions = profile_actions_for_uris(summary.uris, app_id)
+            if profile_actions is not None:
+                return profile_actions
+        actions_text = self.actions_edit.text().strip()
+        return parse_action_sequence(actions_text) if actions_text else DEFAULT_ACTIONS
+
+    def _queue_fill(
+        self,
+        item_id: str | None,
+        actions: tuple[Action, ...],
+        app_id: str,
+    ) -> None:
+        self._pending_app_detection = False
+        self._pending_fill_item_id = item_id
+        self._pending_fill_actions = actions
+        self._pending_fill_app_id = app_id
         self._countdown = self.delay_spin.value()
         if not self._countdown:
-            self._begin_fill(actions)
+            self._begin_fill(actions, item_id, app_id)
             return
-        self.fill_button.setEnabled(False)
+        self._set_busy(True)
         self.status_label.setText(
             f"Switch to the target app now; filling in {self._countdown} seconds…"
         )
@@ -256,33 +550,57 @@ class BitwardenAutofillerWindow(QMainWindow):
         self._countdown -= 1
         if self._countdown <= 0:
             self._countdown_timer.stop()
-            try:
-                actions = parse_action_sequence(self.actions_edit.text())
-            except ValueError as error:
-                self.status_label.setText(str(error))
-                self.fill_button.setEnabled(True)
+            if self._pending_app_detection:
+                self._pending_app_detection = False
+                self._set_busy(False)
+                self._detect_current_app_now()
                 return
-            self._begin_fill(actions)
+            actions = self._pending_fill_actions
+            app_id = self._pending_fill_app_id
+            item_id = self._pending_fill_item_id
+            if actions is None or app_id is None:
+                self._set_busy(False)
+                return
+            self._begin_fill(actions, item_id, app_id)
+        elif self._pending_app_detection:
+            self.status_label.setText(
+                "Switch to the target application; detecting it in "
+                f"{self._countdown} seconds…"
+            )
         else:
             self.status_label.setText(
                 f"Switch to the target app now; filling in {self._countdown} seconds…"
             )
 
-    def _begin_fill(self, actions: Sequence[Action]) -> None:
+    def _begin_fill(
+        self,
+        actions: Sequence[Action],
+        item_id: str | None,
+        expected_app_id: str,
+    ) -> None:
         service = self._service
         if service is None:
             self.status_label.setText("Vault disconnected before filling could start.")
-            self.fill_button.setEnabled(False)
+            self._set_busy(False)
             return
         try:
             app_id = self._current_app_id()
         except (RuntimeError, ValueError) as error:
             self.status_label.setText(str(error))
-            self.fill_button.setEnabled(True)
+            self._set_busy(False)
+            return
+        if app_id != expected_app_id:
+            self.status_label.setText(
+                "The target app ID changed; refresh accounts first."
+            )
+            self._set_busy(False)
             return
 
         self.status_label.setText("Matching vault items and preparing desktop input…")
         self._set_busy(True)
+        self._pending_fill_item_id = None
+        self._pending_fill_actions = None
+        self._pending_fill_app_id = None
 
         def fill() -> FillResult:
             adapter = LazyInputAdapter(
@@ -291,6 +609,10 @@ class BitwardenAutofillerWindow(QMainWindow):
                 )
             )
             try:
+                if item_id is not None:
+                    return fill_selected_login(
+                        service, app_id, item_id, actions, adapter
+                    )
                 return fill_for_app(service, app_id, actions, adapter)
             finally:
                 close = getattr(adapter, "close", None)
@@ -305,11 +627,78 @@ class BitwardenAutofillerWindow(QMainWindow):
             raise ValueError("Enter the target application's app ID first.")
         return resolve_app_id(value)
 
+    def _account_action_requested(self, item_id: str, action: str) -> None:
+        service = self._service
+        if service is None:
+            self.status_label.setText("Connect to the vault before using an account.")
+            return
+        try:
+            app_id = self._current_app_id()
+        except (RuntimeError, ValueError) as error:
+            self.status_label.setText(str(error))
+            return
+        if app_id != self._loaded_app_id:
+            self.status_label.setText("Load accounts for the selected app ID first.")
+            return
+        summary = next((entry for entry in self._matches if entry.id == item_id), None)
+        if summary is None:
+            self.status_label.setText(
+                "That account is no longer in the current mapping."
+            )
+            return
+        if action == "autofill":
+            try:
+                actions = self._actions_for_account(summary, app_id)
+            except ValueError as error:
+                self.status_label.setText(str(error))
+                return
+            self._queue_fill(item_id, actions, app_id)
+            return
+
+        if action not in {"copy_username", "copy_password", "copy_totp"}:
+            self.status_label.setText("Unknown account action.")
+            return
+        self.status_label.setText("Retrieving the requested account value…")
+        self._set_busy(True)
+        self._start_worker(
+            lambda: self._copy_account_value(service, app_id, item_id, action),
+            self._copy_completed,
+        )
+
+    def _copy_account_value(
+        self, service: FillService, app_id: str, item_id: str, action: str
+    ) -> str:
+        if action == "copy_username":
+            summary = next(
+                (
+                    entry
+                    for entry in service.list_matches(app_id)
+                    if entry.id == item_id
+                ),
+                None,
+            )
+            value = summary.username if summary is not None else None
+        elif action == "copy_password":
+            value = service.get_login(app_id, item_id).password
+        else:
+            value = service.get_totp(app_id, item_id)
+        if not value:
+            field_name = action.removeprefix("copy_")
+            raise ValueError(f"The selected login has no {field_name} value.")
+        return value
+
+    def _copy_completed(self, value: str) -> None:
+        self.clipboard_requested.emit(value)
+        self.status_label.setText(
+            "Copied the requested account value to the clipboard."
+        )
+        self._set_busy(False)
+
     def _fill_completed(self, result: FillResult) -> None:
         if result.matched_items == 0:
             self.status_label.setText(
-                "No login is mapped to this app ID. Add a Bitwarden URI "
-                f"pcprocess://{self.app_id_edit.text().strip()}."
+                "No login is mapped to this app ID. Add a matching "
+                "pcprocess:// URI in Bitwarden."
             )
         else:
             self.status_label.setText(
@@ -354,6 +743,14 @@ class BitwardenAutofillerWindow(QMainWindow):
         self.connect_button.setEnabled(not busy)
         self.disconnect_button.setEnabled(not busy and self._service is not None)
         self.fill_button.setEnabled(not busy and self._service is not None)
+        self.app_id_edit.setEnabled(not busy)
+        self.actions_edit.setEnabled(not busy)
+        self.delay_spin.setEnabled(not busy)
+        self.prefer_uri_profile_check.setEnabled(not busy)
+        self.detect_app_button.setEnabled(not busy)
+        self.refresh_accounts_button.setEnabled(not busy and self._service is not None)
+        for row in self._account_rows.values():
+            row.setEnabled(not busy)
 
     @Slot(str)
     def _copy_to_clipboard(self, text: str) -> None:
@@ -373,6 +770,9 @@ class BitwardenAutofillerWindow(QMainWindow):
         self._settings.setValue("email", self.email_edit.text())
         self._settings.setValue("app_id", self.app_id_edit.text())
         self._settings.setValue("actions", self.actions_edit.text())
+        self._settings.setValue(
+            "prefer_uri_profile", self.prefer_uri_profile_check.isChecked()
+        )
         self._settings.setValue("bw_path", self.bw_path_edit.text())
         self._settings.sync()
         event.accept()

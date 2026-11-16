@@ -2,8 +2,8 @@
 
 Bitwarden Autofiller fills login fields in desktop applications using explicitly
 mapped Bitwarden Password Manager entries. It uses the official `bw` CLI, offers
-a command-line client and Qt GUI, and supports Wayland through the XDG Remote
-Desktop portal.
+a command-line client and Qt GUI, and supports Wayland input through the XDG
+Remote Desktop portal plus compositor-supported active-app detection.
 
 ## Requirements
 
@@ -12,6 +12,9 @@ Desktop portal.
   accesses the vault
 - A desktop session for typing. Wayland requires an XDG Remote Desktop portal
   and `libxkbcommon`; X11 and Windows use the optional PyAutoGUI backend.
+- On Wayland, install the `wayland` extra for active-app detection through
+  KWin scripting and the wlr foreign-toplevel protocol. Manual app-ID entry
+  remains available if a compositor does not expose either interface.
 
 ## Install and run
 
@@ -41,10 +44,15 @@ command-line options. The default three-second focus delay gives you time to
 switch to the target application. Set `--delay 0` to disable it or choose a
 different delay. Use `--help` for all options.
 
-In the GUI, enter the same application ID, connect to the vault, then click
-**Fill now** and switch to the target application during the countdown. The
-master password field is masked, cleared immediately after connecting, and is
-never saved in settings.
+In the GUI, connect to the vault and detect or enter the target application ID.
+Detection waits through a focus countdown on both X11 and Wayland. Wayland
+detection uses KWin's scripting API or the compositor's foreign-toplevel
+protocol when available; otherwise enter the ID manually. Load the mapped
+account names, then use each account's
+**Autofill**, **Copy username**, **Copy password**, or **Copy TOTP** button. The
+GUI can also generate and copy a mapping URI from the app ID and action sequence.
+The master password field is masked, cleared immediately after connecting, and
+is never saved in settings.
 
 ## Map a vault entry
 
@@ -55,10 +63,11 @@ pcprocess://<application-id>
 ```
 
 For example, map a Steam login to `pcprocess://steam`, then enter `steam` as the
-application ID in the GUI or CLI. Matching is case-insensitive. Wayland does
-not expose a global foreground process ID through a standard API, so the app ID
-must be entered explicitly; the application does not try to bypass that privacy
-boundary.
+application ID in the GUI or CLI. Matching is case-insensitive. On supported
+Wayland compositors, detection reads the compositor-reported application ID or
+resource class; app IDs can differ between compositors, so confirm the detected
+value against the URI you mapped. No generic XDG portal currently provides this
+information, so unsupported compositors use the manual-ID fallback.
 
 An optional `actions` parameter stores a per-login fill profile in the URI:
 

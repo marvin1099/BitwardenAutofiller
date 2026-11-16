@@ -44,7 +44,10 @@ def authenticate_vault(
     password-environment mechanism establishes a fresh session.
     """
     status = _vault_status(cli.status())
-    _LOGGER.info("Bitwarden vault status: %s", status)
+    safe_status = (
+        status if status in {"unlocked", "locked", "unauthenticated"} else "unknown"
+    )
+    _LOGGER.info("Bitwarden vault status: %s", safe_status)
     if status == "unlocked":
         existing_key = session_key or os.environ.get("BW_SESSION")
         if existing_key:

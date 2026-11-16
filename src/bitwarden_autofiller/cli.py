@@ -57,7 +57,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--app-id",
         help=(
             "Application ID used by the vault URI pcprocess://<app-id> "
-            "(required on Wayland)"
+            "(auto-detected where the compositor supports it)"
         ),
     )
     parser.add_argument(
@@ -100,7 +100,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--log-level",
         choices=("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"),
-        help="Safe diagnostic log level (default: WARNING)",
+        help="Safe diagnostic log level (default: INFO)",
     )
     parser.add_argument(
         "--version", action="version", version=f"%(prog)s {__version__}"
@@ -128,7 +128,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(build_app_uri(args.app_id, generated_actions))
             return 0
 
-        app_id = resolve_app_id(args.app_id)
+        app_id = resolve_app_id(args.app_id) if args.app_id else None
         actions = (
             parse_action_sequence(args.actions) if args.actions is not None else None
         )
@@ -149,6 +149,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         try:
             if args.sync:
                 service.sync()
+            if app_id is None:
+                print(
+                    "Focus the target application; detecting its app ID in "
+                    f"{args.delay:g} seconds."
+                )
+                if args.delay:
+                    time.sleep(args.delay)
+                app_id = resolve_app_id()
             matches = service.list_matches(app_id)
             if not matches:
                 print(
@@ -157,13 +165,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
                 return 1
 
-            print(
-                f"Found {len(matches)} matching login(s). "
-                "Focus the target application; "
-                f"sending input in {args.delay:g} seconds."
-            )
-            if args.delay:
-                time.sleep(args.delay)
+            if args.app_id:
+                print(
+                    f"Found {len(matches)} matching login(s). "
+                    "Focus the target application; "
+                    f"sending input in {args.delay:g} seconds."
+                )
+                if args.delay:
+                    time.sleep(args.delay)
+            else:
+                print(f"Found {len(matches)} matching login(s); sending input now.")
             adapter = LazyInputAdapter(create_input_adapter)
             try:
                 if actions is not None:

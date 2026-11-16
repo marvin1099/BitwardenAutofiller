@@ -21,7 +21,11 @@ desktop = [
   "pywinctl>=0.4.1",
 ]
 gui = ["PySide6>=6.8"]
-wayland = ["eitype>=0.2.2,<0.3"]
+wayland = [
+  "eitype>=0.2.2,<0.3",
+  "dbus-fast>=2.0",
+  "pywayland>=0.4.16,<0.5",
+]
 
 [project.scripts]
 bitwarden-autofiller = "bitwarden_autofiller.cli:main"
@@ -50,7 +54,10 @@ pythonpath = ["src"]
 [tool.coverage.run]
 branch = true
 source = ["bitwarden_autofiller"]
-omit = ["*/bitwarden_autofiller/desktop/gui.py"]
+omit = [
+  "*/bitwarden_autofiller/desktop/gui.py",
+  "*/bitwarden_autofiller/desktop/_protocols/*",
+]
 
 [tool.coverage.report]
 show_missing = true

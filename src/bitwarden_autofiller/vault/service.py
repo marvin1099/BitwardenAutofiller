@@ -45,7 +45,7 @@ class VaultService:
         session_key = self._require_session()
         response = self._cli.command(["list", "items"], session_key=session_key)
         matches = matching_logins(summaries_from_response(response), app_id)
-        _LOGGER.debug("Vault lookup completed with %d matching login(s)", len(matches))
+        _LOGGER.info("Vault lookup completed with %d matching login(s)", len(matches))
         return matches
 
     def get_login(self, app_id: str, item_id: str) -> LoginCredentials:

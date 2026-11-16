@@ -20,11 +20,13 @@ class FakeService:
         )
         self.synced = False
         self.closed = False
+        self.requested_app_ids: list[str] = []
 
     def sync(self) -> None:
         self.synced = True
 
     def list_matches(self, app_id: str) -> tuple[LoginSummary, ...]:
+        self.requested_app_ids.append(app_id)
         return self.matches
 
     def close(self) -> None:
@@ -115,6 +117,27 @@ def test_cli_fills_and_closes_service_and_input_adapter(
     assert service.closed
     assert input_adapter.closed
     assert "3 input operation(s)" in capsys.readouterr().out
+
+
+def test_cli_detects_active_app_after_the_focus_countdown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, _ = setup_cli(monkeypatch)
+    events: list[str] = []
+    monkeypatch.setattr(
+        "bitwarden_autofiller.cli.time.sleep", lambda _: events.append("countdown")
+    )
+
+    def detect(*_args: str | None) -> str:
+        events.append("detect")
+        return "steam"
+
+    monkeypatch.setattr(cli, "resolve_app_id", detect)
+
+    assert cli.main(["--delay", "3"]) == 0
+
+    assert events == ["countdown", "detect"]
+    assert service.requested_app_ids == ["steam"]
 
 
 def test_cli_uses_the_first_match_uri_profile_when_actions_are_not_overridden(

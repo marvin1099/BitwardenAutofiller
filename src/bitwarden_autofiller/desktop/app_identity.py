@@ -2,11 +2,19 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
+from collections.abc import Callable
 from importlib import import_module
 
 from bitwarden_autofiller.app_uri import APP_URI_SCHEME, normalize_app_id
+from bitwarden_autofiller.desktop.wayland_identity import (
+    detect_kwin_active_app_id,
+    detect_wlr_active_app_id,
+)
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class ActiveApplicationUnavailable(RuntimeError):
@@ -14,12 +22,7 @@ class ActiveApplicationUnavailable(RuntimeError):
 
 
 def resolve_app_id(explicit_app_id: str | None = None) -> str:
-    """Use an explicit ID, or best-effort foreground-window detection.
-
-    Generic Wayland protocols intentionally do not expose a global foreground
-    process name. Wayland callers should provide an app ID explicitly instead
-    of attempting to bypass the compositor's privacy boundary.
-    """
+    """Use an explicit ID or a compositor-supported foreground-window API."""
     if explicit_app_id and explicit_app_id.strip():
         value = explicit_app_id.strip()
         if value.casefold().startswith(APP_URI_SCHEME):
@@ -33,8 +36,43 @@ def resolve_app_id(explicit_app_id: str | None = None) -> str:
         or os.environ.get("XDG_SESSION_TYPE", "").casefold() == "wayland"
     )
     if is_wayland:
+        desktops = " ".join(
+            (
+                os.environ.get("XDG_CURRENT_DESKTOP", ""),
+                os.environ.get("XDG_SESSION_DESKTOP", ""),
+            )
+        ).casefold()
+        is_kde = (
+            "kde" in desktops
+            or "plasma" in desktops
+            or bool(os.environ.get("KDE_FULL_SESSION"))
+        )
+        backends: tuple[tuple[str, Callable[[], str]], ...] = (
+            (
+                ("KWin", detect_kwin_active_app_id),
+                ("foreign-toplevel", detect_wlr_active_app_id),
+            )
+            if is_kde
+            else (
+                ("foreign-toplevel", detect_wlr_active_app_id),
+                ("KWin", detect_kwin_active_app_id),
+            )
+        )
+        for backend_name, detect in backends:
+            try:
+                app_id = detect().strip()
+            except Exception as error:
+                _LOGGER.debug(
+                    "Wayland active-app backend %s unavailable (%s)",
+                    backend_name,
+                    type(error).__name__,
+                )
+                continue
+            if app_id:
+                return app_id
         raise ActiveApplicationUnavailable(
-            "Wayland does not expose the active app ID; enter it explicitly"
+            "Could not detect the active Wayland application; enter --app-id "
+            "explicitly or install the optional Wayland detection dependencies"
         )
 
     try:

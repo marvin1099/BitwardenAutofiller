@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -23,6 +24,8 @@ from bitwarden_autofiller.logging_config import configure_logging
 from bitwarden_autofiller.vault.authentication import authenticate_vault
 from bitwarden_autofiller.vault.bitwarden import BitwardenCLI, BitwardenCLIError
 
+_LOGGER = logging.getLogger(__name__)
+
 
 def default_token_path() -> Path:
     """Return the private per-user configuration path for daemon auth."""
@@ -39,7 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--log-level",
         choices=("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"),
-        help="Safe diagnostic log level (default: WARNING)",
+        help="Safe diagnostic log level (default: INFO)",
     )
     commands = parser.add_subparsers(dest="command", required=True)
 
@@ -73,6 +76,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 ca_certificate=args.ca_certificate,
             )
             client.request("close")
+            _LOGGER.info("Authenticated daemon shutdown request sent")
             print("Authenticated shutdown request sent.")
             return 0
 
@@ -88,6 +92,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 tls_private_key=args.tls_private_key,
             )
             host, port = daemon.address
+            _LOGGER.info("Daemon listening on %s:%d", host, port)
             print(f"Bitwarden Autofiller daemon listening on {host}:{port}.")
             try:
                 daemon.serve_forever()
@@ -95,6 +100,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print("Stopping Bitwarden Autofiller daemon.")
             finally:
                 daemon.shutdown()
+                _LOGGER.info("Daemon stopped")
             return 0
         finally:
             service.close()
