@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import sys
 from collections.abc import Callable, Sequence
-from concurrent.futures import Future
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -14,9 +14,8 @@ from uuid import uuid4
 from PySide6.QtCore import (
     QByteArray,
     QMimeData,
-    QObject,
     QSettings,
-    QThread,
+    Qt,
     QTimer,
     Signal,
     Slot,
@@ -36,6 +35,8 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSpinBox,
+    QStackedWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -87,39 +88,27 @@ class _FillOutcome:
     active_app_unverified: bool
 
 
-class _OperationWorker(QObject):
-    completed = Signal(object)
-    failed = Signal(str)
+@dataclass(frozen=True, slots=True)
+class _OperationCompletion:
+    callback: Callable[[Any], None]
+    result: Any
 
-    def __init__(self, operation: Callable[[], Any]) -> None:
-        super().__init__()
-        self._operation = operation
 
-    @Slot()
-    def run(self) -> None:
-        try:
-            result = self._operation()
-        except Exception as error:
-            _LOGGER.warning("GUI operation failed (%s)", type(error).__name__)
-            if isinstance(
-                error,
-                (
-                    ActiveApplicationUnavailable,
-                    AuthenticationError,
-                    BitwardenCLIError,
-                    InputBackendError,
-                    PartialFillError,
-                    ValueError,
-                ),
-            ):
-                message = str(error)
-            else:
-                message = (
-                    "The operation failed; check Bitwarden and desktop permissions."
-                )
-            self.failed.emit(message)
-        else:
-            self.completed.emit(result)
+def _operation_error_message(error: Exception) -> str:
+    _LOGGER.warning("GUI operation failed (%s)", type(error).__name__)
+    if isinstance(
+        error,
+        (
+            ActiveApplicationUnavailable,
+            AuthenticationError,
+            BitwardenCLIError,
+            InputBackendError,
+            PartialFillError,
+            ValueError,
+        ),
+    ):
+        return str(error)
+    return "The operation failed; check Bitwarden and desktop permissions."
 
 
 class AccountRow(QWidget):
@@ -158,12 +147,47 @@ class AccountRow(QWidget):
         return button
 
 
+class CollapsibleSection(QWidget):
+    """A section whose detailed controls start collapsed."""
+
+    def __init__(self, title: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.toggle_button = QToolButton(self)
+        self.toggle_button.setObjectName("collapsibleSectionToggle")
+        self.toggle_button.setText(title)
+        self.toggle_button.setCheckable(True)
+        self.toggle_button.setChecked(False)
+        self.toggle_button.setToolButtonStyle(
+            Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+        )
+        self.toggle_button.setArrowType(Qt.ArrowType.RightArrow)
+        self.content_widget = QWidget(self)
+        self.content_widget.setObjectName("collapsibleSectionContent")
+        self.content_widget.setVisible(False)
+        self.content_layout = QVBoxLayout(self.content_widget)
+        self.content_layout.setContentsMargins(12, 4, 4, 4)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.toggle_button)
+        layout.addWidget(self.content_widget)
+        self.toggle_button.toggled.connect(self._set_expanded)
+
+    def _set_expanded(self, expanded: bool) -> None:
+        self.content_widget.setVisible(expanded)
+        self.toggle_button.setArrowType(
+            Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow
+        )
+
+
 class BitwardenAutofillerWindow(QMainWindow):
     """One-window local autofill client; credentials are not stored in settings."""
 
     clipboard_requested = Signal(str)
     _input_clipboard_requested = Signal(str, object)
     _input_clipboard_cleanup_requested = Signal(str, object)
+    _operation_result_ready = Signal(object)
+    _operation_error_ready = Signal(str)
 
     def __init__(
         self,
@@ -175,8 +199,10 @@ class BitwardenAutofillerWindow(QMainWindow):
         self._settings = settings or QSettings("BitwardenAutofiller", "DesktopClient")
         self._cli_factory = cli_factory
         self._service: VaultService | None = None
-        self._thread: QThread | None = None
-        self._worker: _OperationWorker | None = None
+        self._executor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="bitwarden-autofiller"
+        )
+        self._active_future: Future[Any] | None = None
         self._busy = False
         self._matches: tuple[LoginSummary, ...] = ()
         self._loaded_app_id: str | None = None
@@ -200,20 +226,22 @@ class BitwardenAutofillerWindow(QMainWindow):
         self.resize(900, 720)
         self.clipboard_requested.connect(self._copy_to_clipboard)
         self._build_ui()
+        self._operation_result_ready.connect(self._deliver_worker_result)
+        self._operation_error_ready.connect(self._operation_failed)
         self._input_clipboard_requested.connect(self._set_input_clipboard)
         self._input_clipboard_cleanup_requested.connect(self._clear_input_clipboard)
         self._restore_settings()
 
     def _build_ui(self) -> None:
         central = QWidget(self)
-        layout = QVBoxLayout(central)
-        layout.setContentsMargins(22, 18, 22, 18)
-        layout.setSpacing(14)
+        root_layout = QVBoxLayout(central)
+        root_layout.setContentsMargins(22, 18, 22, 18)
+        root_layout.setSpacing(14)
 
         title = QLabel("Bitwarden Autofiller")
         title.setObjectName("windowTitle")
         title.setStyleSheet("font-size: 22px; font-weight: 600")
-        layout.addWidget(title)
+        root_layout.addWidget(title)
 
         explanation = QLabel(
             "Fill a desktop app login explicitly mapped in Bitwarden. "
@@ -222,7 +250,27 @@ class BitwardenAutofillerWindow(QMainWindow):
         )
         explanation.setWordWrap(True)
         explanation.setObjectName("introLabel")
-        layout.addWidget(explanation)
+        root_layout.addWidget(explanation)
+
+        navigation = QHBoxLayout()
+        self.vault_page_button = QPushButton("Vault")
+        self.vault_page_button.setObjectName("vaultPageButton")
+        self.vault_page_button.setCheckable(True)
+        self.accounts_page_button = QPushButton("Accounts")
+        self.accounts_page_button.setObjectName("accountsPageButton")
+        self.accounts_page_button.setCheckable(True)
+        navigation.addWidget(self.vault_page_button)
+        navigation.addWidget(self.accounts_page_button)
+        navigation.addStretch(1)
+        root_layout.addLayout(navigation)
+
+        self.page_stack = QStackedWidget()
+        self.page_stack.setObjectName("mainPageStack")
+        root_layout.addWidget(self.page_stack, 1)
+
+        self.vault_page = QWidget()
+        self.vault_page.setObjectName("vaultPage")
+        vault_page_layout = QVBoxLayout(self.vault_page)
 
         vault_box = QGroupBox("Vault")
         vault_form = QFormLayout(vault_box)
@@ -263,15 +311,80 @@ class BitwardenAutofillerWindow(QMainWindow):
         vault_form.addRow("Bitwarden CLI", self.bw_path_edit)
         vault_form.addRow(self.bw_system_ca_check)
         vault_form.addRow("Additional CA certificate", bw_ca_row)
-        layout.addWidget(vault_box)
+        vault_page_layout.addWidget(vault_box)
 
-        fill_box = QGroupBox("Target and fill sequence")
-        fill_form = QFormLayout(fill_box)
+        vault_actions = QHBoxLayout()
+        self.connect_button = QPushButton("Connect to vault")
+        self.connect_button.setObjectName("connectButton")
+        self.disconnect_button = QPushButton("Disconnect")
+        self.disconnect_button.setObjectName("disconnectButton")
+        self.disconnect_button.setEnabled(False)
+        self.sync_vault_button = QPushButton("Sync vault")
+        self.sync_vault_button.setObjectName("syncVaultButton")
+        self.sync_vault_button.setEnabled(False)
+        self.sync_vault_button.setToolTip(
+            "Synchronize with Bitwarden and refresh accounts for the selected app."
+        )
+        self.diagnostics_button = QPushButton("Desktop diagnostics")
+        self.diagnostics_button.setObjectName("desktopDiagnosticsButton")
+        vault_actions.addWidget(self.connect_button)
+        vault_actions.addWidget(self.disconnect_button)
+        vault_actions.addWidget(self.sync_vault_button)
+        vault_actions.addWidget(self.diagnostics_button)
+        vault_actions.addStretch(1)
+        vault_page_layout.addLayout(vault_actions)
+        vault_page_layout.addStretch(1)
+        self.page_stack.addWidget(self.vault_page)
+
+        self.accounts_page = QWidget()
+        self.accounts_page.setObjectName("accountsPage")
+        accounts_page_layout = QVBoxLayout(self.accounts_page)
+
+        target_box = QGroupBox("Target application")
+        target_form = QFormLayout(target_box)
         self.app_id_edit = QLineEdit()
         self.app_id_edit.setObjectName("appIdEdit")
         self.app_id_edit.setPlaceholderText(
             "e.g. steam or pcprocess://steam (Wayland: enter explicitly)"
         )
+        target_buttons = QHBoxLayout()
+        self.detect_app_button = QPushButton("Detect active app")
+        self.detect_app_button.setObjectName("detectAppButton")
+        self.refresh_accounts_button = QPushButton("Load accounts")
+        self.refresh_accounts_button.setObjectName("loadAccountsButton")
+        self.refresh_accounts_button.setEnabled(False)
+        self.fill_button = QPushButton("Fill now")
+        self.fill_button.setObjectName("fillButton")
+        self.fill_button.setEnabled(False)
+        target_buttons.addWidget(self.detect_app_button)
+        target_buttons.addWidget(self.refresh_accounts_button)
+        target_buttons.addWidget(self.fill_button)
+        target_buttons.addStretch(1)
+        target_form.addRow("Application ID", self.app_id_edit)
+        target_form.addRow(target_buttons)
+        accounts_page_layout.addWidget(target_box)
+
+        accounts_box = QGroupBox("Accounts mapped to this application")
+        accounts_layout = QVBoxLayout(accounts_box)
+        self.accounts_status_label = QLabel(
+            "Connect to the vault and load accounts for an application."
+        )
+        self.accounts_status_label.setObjectName("accountsStatusLabel")
+        accounts_layout.addWidget(self.accounts_status_label)
+        self.accounts_scroll = QScrollArea()
+        self.accounts_scroll.setObjectName("accountsScrollArea")
+        self.accounts_scroll.setWidgetResizable(True)
+        self.accounts_scroll.setMinimumHeight(120)
+        self.accounts_content = QWidget()
+        self.accounts_rows_layout = QVBoxLayout(self.accounts_content)
+        self.accounts_rows_layout.setContentsMargins(2, 2, 2, 2)
+        self.accounts_rows_layout.setSpacing(2)
+        self.accounts_scroll.setWidget(self.accounts_content)
+        accounts_layout.addWidget(self.accounts_scroll)
+        accounts_page_layout.addWidget(accounts_box, 1)
+
+        self.advanced_settings = CollapsibleSection("Advanced target and fill sequence")
+        advanced_form = QFormLayout()
         self.active_app_command_edit = QLineEdit()
         self.active_app_command_edit.setObjectName("activeAppCommandEdit")
         self.active_app_command_edit.setPlaceholderText(
@@ -291,6 +404,8 @@ class BitwardenAutofillerWindow(QMainWindow):
             "Bypasses the focus check only when active-app detection is unavailable. "
             "Credentials will be sent to whichever window has focus."
         )
+        advanced_form.addRow("Active-app PID command", self.active_app_command_edit)
+        advanced_form.addRow(self.allow_unverified_target_check)
         self.actions_edit = QLineEdit("C14724635")
         self.actions_edit.setObjectName("fillActionsEdit")
         self.actions_edit.setToolTip(
@@ -302,27 +417,14 @@ class BitwardenAutofillerWindow(QMainWindow):
         )
         self.prefer_uri_profile_check.setObjectName("preferUriProfileCheck")
         self.prefer_uri_profile_check.setChecked(True)
+        advanced_form.addRow("Actions", self.actions_edit)
+        advanced_form.addRow("Profile", self.prefer_uri_profile_check)
         self.delay_spin = QSpinBox()
         self.delay_spin.setObjectName("focusDelaySpin")
         self.delay_spin.setRange(0, 15)
         self.delay_spin.setValue(3)
         self.delay_spin.setSuffix(" s")
-        app_buttons = QHBoxLayout()
-        self.detect_app_button = QPushButton("Detect active app")
-        self.detect_app_button.setObjectName("detectAppButton")
-        self.refresh_accounts_button = QPushButton("Load accounts")
-        self.refresh_accounts_button.setObjectName("loadAccountsButton")
-        self.refresh_accounts_button.setEnabled(False)
-        app_buttons.addWidget(self.detect_app_button)
-        app_buttons.addWidget(self.refresh_accounts_button)
-        app_buttons.addStretch(1)
-        fill_form.addRow("Application ID", self.app_id_edit)
-        fill_form.addRow(app_buttons)
-        fill_form.addRow("Active-app PID command", self.active_app_command_edit)
-        fill_form.addRow(self.allow_unverified_target_check)
-        fill_form.addRow("Actions", self.actions_edit)
-        fill_form.addRow("Profile", self.prefer_uri_profile_check)
-        fill_form.addRow("Focus delay", self.delay_spin)
+        advanced_form.addRow("Focus delay", self.delay_spin)
 
         self.generated_uri_edit = QLineEdit()
         self.generated_uri_edit.setObjectName("generatedUriEdit")
@@ -337,62 +439,21 @@ class BitwardenAutofillerWindow(QMainWindow):
         uri_buttons.addWidget(self.generate_uri_button)
         uri_buttons.addWidget(self.copy_uri_button)
         uri_buttons.addStretch(1)
-        fill_form.addRow("Bitwarden URI", self.generated_uri_edit)
-        fill_form.addRow(uri_buttons)
-        layout.addWidget(fill_box)
-
-        accounts_box = QGroupBox("Accounts mapped to this application")
-        accounts_layout = QVBoxLayout(accounts_box)
-        self.accounts_status_label = QLabel(
-            "Connect to the vault and load accounts for an application."
-        )
-        self.accounts_status_label.setObjectName("accountsStatusLabel")
-        accounts_layout.addWidget(self.accounts_status_label)
-        self.accounts_scroll = QScrollArea()
-        self.accounts_scroll.setObjectName("accountsScrollArea")
-        self.accounts_scroll.setWidgetResizable(True)
-        self.accounts_scroll.setMinimumHeight(120)
-        self.accounts_content = QWidget()
-        self.accounts_rows_layout = QVBoxLayout(self.accounts_content)
-        self.accounts_rows_layout.setContentsMargins(2, 2, 2, 2)
-        self.accounts_rows_layout.setSpacing(2)
-        self.accounts_scroll.setWidget(self.accounts_content)
-        accounts_layout.addWidget(self.accounts_scroll)
-        layout.addWidget(accounts_box, 1)
-
-        buttons = QHBoxLayout()
-        self.connect_button = QPushButton("Connect to vault")
-        self.connect_button.setObjectName("connectButton")
-        self.disconnect_button = QPushButton("Disconnect")
-        self.disconnect_button.setObjectName("disconnectButton")
-        self.disconnect_button.setEnabled(False)
-        self.sync_vault_button = QPushButton("Sync vault")
-        self.sync_vault_button.setObjectName("syncVaultButton")
-        self.sync_vault_button.setEnabled(False)
-        self.sync_vault_button.setToolTip(
-            "Synchronize with Bitwarden and refresh accounts for the selected app."
-        )
-        self.fill_button = QPushButton("Fill now")
-        self.fill_button.setObjectName("fillButton")
-        self.fill_button.setEnabled(False)
-        self.diagnostics_button = QPushButton("Desktop diagnostics")
-        self.diagnostics_button.setObjectName("desktopDiagnosticsButton")
-        buttons.addWidget(self.connect_button)
-        buttons.addWidget(self.disconnect_button)
-        buttons.addWidget(self.sync_vault_button)
-        buttons.addWidget(self.diagnostics_button)
-        buttons.addStretch(1)
-        buttons.addWidget(self.fill_button)
-        layout.addLayout(buttons)
+        advanced_form.addRow("Bitwarden URI", self.generated_uri_edit)
+        advanced_form.addRow(uri_buttons)
+        self.advanced_settings.content_layout.addLayout(advanced_form)
+        accounts_page_layout.addWidget(self.advanced_settings)
+        self.page_stack.addWidget(self.accounts_page)
 
         self.status_label = QLabel("Ready. Your master password is never saved.")
         self.status_label.setObjectName("statusLabel")
         self.status_label.setWordWrap(True)
         self.status_label.setMinimumHeight(38)
-        layout.addWidget(self.status_label)
-        layout.addStretch(1)
+        root_layout.addWidget(self.status_label)
 
         self.setCentralWidget(central)
+        self.vault_page_button.clicked.connect(self._show_vault_page)
+        self.accounts_page_button.clicked.connect(self._show_accounts_page)
         self.connect_button.clicked.connect(self._connect_to_vault)
         self.disconnect_button.clicked.connect(self._disconnect_from_vault)
         self.sync_vault_button.clicked.connect(self._sync_vault)
@@ -404,6 +465,27 @@ class BitwardenAutofillerWindow(QMainWindow):
         self.generate_uri_button.clicked.connect(self._generate_uri)
         self.copy_uri_button.clicked.connect(self._copy_generated_uri)
         self.browse_bw_ca_button.clicked.connect(self._browse_bw_ca_certificate)
+        self._show_page("vault")
+
+    @Slot(bool)
+    def _show_vault_page(self, _checked: bool = False) -> None:
+        self._show_page("vault")
+
+    @Slot(bool)
+    def _show_accounts_page(self, _checked: bool = False) -> None:
+        self._show_page("accounts")
+
+    def _show_page(self, page: str) -> None:
+        if page == "vault":
+            self.page_stack.setCurrentWidget(self.vault_page)
+            self.vault_page_button.setChecked(True)
+            self.accounts_page_button.setChecked(False)
+        elif page == "accounts":
+            self.page_stack.setCurrentWidget(self.accounts_page)
+            self.vault_page_button.setChecked(False)
+            self.accounts_page_button.setChecked(True)
+        else:
+            raise ValueError(f"Unknown app page: {page}")
 
     def _restore_settings(self) -> None:
         self.email_edit.setText(str(self._settings.value("email", "")))
@@ -473,11 +555,7 @@ class BitwardenAutofillerWindow(QMainWindow):
         self._service = service
         self.status_label.setText("Connected. Detect or enter the target app ID.")
         self._set_busy(False)
-        thread = self._thread
-        if thread is not None and thread.isRunning():
-            thread.finished.connect(self._select_target_after_connection)
-        else:
-            self._select_target_after_connection()
+        self._select_target_after_connection()
 
     def _sync_vault(self) -> None:
         if self._busy:
@@ -492,7 +570,7 @@ class BitwardenAutofillerWindow(QMainWindow):
         self._start_worker(service.sync, self._vault_synced)
 
     def _vault_synced(self, _result: Any) -> None:
-        thread = self._thread
+        self._show_page("accounts")
         if not self.app_id_edit.text().strip():
             self.status_label.setText(
                 "Vault synced. Enter an application ID to load mapped accounts."
@@ -505,14 +583,12 @@ class BitwardenAutofillerWindow(QMainWindow):
 
         self.status_label.setText("Vault synced. Refreshing mapped accounts…")
         self._set_busy(False)
-        if thread is not None and thread.isRunning():
-            thread.finished.connect(self._load_accounts)
-        else:
-            self._load_accounts()
+        self._load_accounts()
 
     def _select_target_after_connection(self) -> None:
         if self._service is None:
             return
+        self._show_page("accounts")
         if self.app_id_edit.text().strip():
             self._load_accounts()
         else:
@@ -562,20 +638,17 @@ class BitwardenAutofillerWindow(QMainWindow):
         )
 
     def _active_app_detected(self, app_id: str) -> None:
+        self._show_page("accounts")
         self.app_id_edit.setText(app_id)
         if self._service is not None:
             self.status_label.setText("Detected app ID. Loading mapped accounts…")
         else:
             self.status_label.setText("Detected app ID.")
-        thread = self._thread
         service = self._service
         self._set_busy(False)
         if service is None:
             return
-        if thread is not None and thread.isRunning():
-            thread.finished.connect(self._load_accounts)
-        else:
-            self._load_accounts()
+        self._load_accounts()
 
     def _load_accounts(self) -> None:
         service = self._service
@@ -652,6 +725,7 @@ class BitwardenAutofillerWindow(QMainWindow):
         self._clear_account_rows()
         self.accounts_status_label.setText("Connect to the vault to load accounts.")
         self.status_label.setText("Disconnected. No vault session is active.")
+        self._show_page("vault")
         self._refresh_buttons()
 
     def _start_fill_countdown(self) -> None:
@@ -923,37 +997,39 @@ class BitwardenAutofillerWindow(QMainWindow):
     def _start_worker(
         self, operation: Callable[[], Any], on_complete: Callable[[Any], None]
     ) -> None:
-        thread = QThread(self)
-        worker = _OperationWorker(operation)
-        worker.moveToThread(thread)
-        thread.started.connect(worker.run)
-        worker.completed.connect(on_complete)
-        worker.failed.connect(self._operation_failed)
-        worker.completed.connect(thread.quit)
-        worker.failed.connect(thread.quit)
-        thread.finished.connect(worker.deleteLater)
-        thread.finished.connect(lambda: self._thread_finished(thread))
-        self._thread = thread
-        self._worker = worker
-        thread.start()
+        self._active_future = self._executor.submit(
+            self._run_operation, operation, on_complete
+        )
 
+    def _run_operation(
+        self, operation: Callable[[], Any], on_complete: Callable[[Any], None]
+    ) -> None:
+        try:
+            result = operation()
+        except Exception as error:
+            self._operation_error_ready.emit(_operation_error_message(error))
+        else:
+            self._operation_result_ready.emit(_OperationCompletion(on_complete, result))
+
+    @Slot(object)
+    def _deliver_worker_result(self, completion: object) -> None:
+        self._active_future = None
+        if isinstance(completion, _OperationCompletion):
+            completion.callback(completion.result)
+
+    @Slot(str)
     def _operation_failed(self, message: str) -> None:
+        self._active_future = None
         self.status_label.setText(message)
         self.allow_unverified_target_check.setChecked(False)
         self._set_busy(False)
-
-    def _thread_finished(self, thread: QThread) -> None:
-        if self._thread is thread:
-            self._thread = None
-            self._worker = None
-            self._refresh_buttons()
 
     def _set_busy(self, busy: bool) -> None:
         self._busy = busy
         self._refresh_buttons()
 
     def _refresh_buttons(self) -> None:
-        busy = self._busy or (self._thread is not None and self._thread.isRunning())
+        busy = self._busy or self._active_future is not None
         self.connect_button.setEnabled(not busy)
         self.disconnect_button.setEnabled(not busy and self._service is not None)
         self.sync_vault_button.setEnabled(not busy and self._service is not None)
@@ -1052,7 +1128,7 @@ class BitwardenAutofillerWindow(QMainWindow):
                 self._temporary_clipboard_text = None
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        if self._thread is not None and self._thread.isRunning():
+        if self._active_future is not None:
             self.status_label.setText("Please wait for the active operation to finish.")
             event.ignore()
             return
@@ -1073,6 +1149,7 @@ class BitwardenAutofillerWindow(QMainWindow):
         self._settings.setValue("bw_system_ca", self.bw_system_ca_check.isChecked())
         self._settings.setValue("bw_ca_certificate", self.bw_ca_certificate_edit.text())
         self._settings.sync()
+        self._executor.shutdown(wait=True, cancel_futures=True)
         event.accept()
 
 

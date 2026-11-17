@@ -23,7 +23,7 @@ from bitwarden_autofiller.desktop.diagnostics import DiagnosticItem
 from bitwarden_autofiller.desktop.gui import (
     AccountRow,
     BitwardenAutofillerWindow,
-    _OperationWorker,
+    _operation_error_message,
 )
 from bitwarden_autofiller.desktop.platforms import InputBackendError
 from bitwarden_autofiller.filling.actions import parse_action_sequence
@@ -72,6 +72,9 @@ def test_gui_builds_without_connecting_to_a_real_vault(tmp_path: Path) -> None:
     assert not window.allow_unverified_target_check.isChecked()
     assert window.bw_system_ca_check.isChecked()
     assert not window.bw_ca_certificate_edit.text()
+    assert window.page_stack.currentWidget() is window.vault_page
+    assert not window.advanced_settings.toggle_button.isChecked()
+    assert window.advanced_settings.content_widget.isHidden()
     assert window.findChild(QLineEdit, "masterPasswordEdit") is window.password_edit
     assert window.password_edit.echoMode() == QLineEdit.EchoMode.Password
     assert not window.fill_button.isEnabled()
@@ -89,6 +92,10 @@ def test_gui_builds_without_connecting_to_a_real_vault(tmp_path: Path) -> None:
     window.clipboard_requested.connect(copied_uris.append)
     window._copy_generated_uri()
     assert copied_uris == ["pcprocess://steam?actions=147"]
+    window.accounts_page_button.click()
+    assert window.page_stack.currentWidget() is window.accounts_page
+    window.vault_page_button.click()
+    assert window.page_stack.currentWidget() is window.vault_page
 
     window.email_edit.setText("alice@example.test")
     window.active_app_command_edit.setText("printf 4242")
@@ -194,6 +201,8 @@ def test_accounts_view_shows_names_and_per_account_actions(tmp_path: Path) -> No
     assert "1 account(s) mapped to steam" in window.accounts_status_label.text()
     row = window._account_rows["steam-entry"]
     assert isinstance(row, AccountRow)
+    assert not row.isWindow()
+    assert row.parentWidget() is window.accounts_content
     assert row.name_label.text() == "Steam Personal"
     emitted: list[tuple[str, str]] = []
     row.action_requested.connect(lambda item, action: emitted.append((item, action)))
@@ -209,6 +218,40 @@ def test_accounts_view_shows_names_and_per_account_actions(tmp_path: Path) -> No
     ]
     assert window._actions_for_account(summary, "steam") == parse_action_sequence("14")
 
+    window.close()
+    app.processEvents()
+
+
+def test_accounts_loaded_from_worker_stay_embedded_in_accounts_page(
+    tmp_path: Path,
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
+    window = BitwardenAutofillerWindow(settings=settings)
+    summary = LoginSummary("entry", "Example", "alice", ("pcprocess://steam",))
+    window._service = FakeVaultService(summary)  # type: ignore[assignment]
+    window.app_id_edit.setText("steam")
+    window._show_page("accounts")
+    loop = QEventLoop()
+    window._load_accounts()
+    monitor = QTimer()
+    monitor.setInterval(10)
+    monitor.timeout.connect(
+        lambda: (
+            loop.quit() if window._matches and window._active_future is None else None
+        )
+    )
+    monitor.start()
+    QTimer.singleShot(5000, loop.quit)
+    loop.exec()
+    monitor.stop()
+
+    assert window._active_future is None
+    row = window._account_rows["entry"]
+    assert not row.isWindow()
+    assert row.parentWidget() is window.accounts_content
+    assert window.page_stack.currentWidget() is window.accounts_page
+    window._service = None
     window.close()
     app.processEvents()
 
@@ -597,14 +640,9 @@ def test_gui_requires_opt_in_and_warns_if_active_app_cannot_be_verified(
 
 
 def test_gui_shows_partial_fill_warning_instead_of_generic_error() -> None:
-    worker = _OperationWorker(lambda: (_ for _ in ()).throw(PartialFillError(1, 1)))
-    errors: list[str] = []
-    worker.failed.connect(errors.append)
+    message = _operation_error_message(PartialFillError(1, 1))
 
-    worker.run()
-
-    assert len(errors) == 1
-    assert "Earlier fields or clipboard contents may have changed" in errors[0]
+    assert "Earlier fields or clipboard contents may have changed" in message
 
 
 def test_fill_button_reports_invalid_action_sequences_without_starting_work(
@@ -626,7 +664,7 @@ def test_fill_button_reports_invalid_action_sequences_without_starting_work(
     window._start_fill_countdown()
 
     assert "Unknown fill action" in window.status_label.text()
-    assert window._thread is None
+    assert window._active_future is None
     window._service = None
     window.close()
     app.processEvents()
