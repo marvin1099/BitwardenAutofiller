@@ -54,7 +54,6 @@ pythonpath = ["src"]
 branch = true
 source = ["bitwarden_autofiller"]
 omit = [
-  "*/bitwarden_autofiller/desktop/gui.py",
   "*/bitwarden_autofiller/desktop/_protocols/*",
 ]
 

@@ -7,6 +7,7 @@ import sys
 from collections.abc import Callable, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -24,6 +25,7 @@ from PySide6.QtGui import QCloseEvent, QGuiApplication, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
+    QComboBox,
     QFileDialog,
     QFormLayout,
     QGroupBox,
@@ -206,6 +208,7 @@ class BitwardenAutofillerWindow(QMainWindow):
         self._busy = False
         self._matches: tuple[LoginSummary, ...] = ()
         self._loaded_app_id: str | None = None
+        self._last_sync_at: datetime | None = None
         self._account_rows: dict[str, AccountRow] = {}
         self._pending_fill_item_id: str | None = None
         self._pending_fill_actions: tuple[Action, ...] | None = None
@@ -331,8 +334,12 @@ class BitwardenAutofillerWindow(QMainWindow):
         vault_actions.addWidget(self.disconnect_button)
         vault_actions.addWidget(self.sync_vault_button)
         vault_actions.addWidget(self.diagnostics_button)
+        self.last_sync_label = QLabel("Last successful sync: never")
+        self.last_sync_label.setObjectName("lastSyncLabel")
+        self.last_sync_label.setWordWrap(True)
         vault_actions.addStretch(1)
         vault_page_layout.addLayout(vault_actions)
+        vault_page_layout.addWidget(self.last_sync_label)
         vault_page_layout.addStretch(1)
         self.page_stack.addWidget(self.vault_page)
 
@@ -366,6 +373,18 @@ class BitwardenAutofillerWindow(QMainWindow):
 
         accounts_box = QGroupBox("Accounts mapped to this application")
         accounts_layout = QVBoxLayout(accounts_box)
+        account_controls = QHBoxLayout()
+        self.account_search_edit = QLineEdit()
+        self.account_search_edit.setObjectName("accountSearchEdit")
+        self.account_search_edit.setPlaceholderText("Search by name or username")
+        self.account_search_edit.setClearButtonEnabled(True)
+        self.account_sort_combo = QComboBox()
+        self.account_sort_combo.setObjectName("accountSortCombo")
+        self.account_sort_combo.addItem("Name (A to Z)", userData="name")
+        self.account_sort_combo.addItem("Username (A to Z)", userData="username")
+        account_controls.addWidget(self.account_search_edit, 1)
+        account_controls.addWidget(self.account_sort_combo)
+        accounts_layout.addLayout(account_controls)
         self.accounts_status_label = QLabel(
             "Connect to the vault and load accounts for an application."
         )
@@ -462,6 +481,8 @@ class BitwardenAutofillerWindow(QMainWindow):
         self.detect_app_button.clicked.connect(self._start_app_detection)
         self.refresh_accounts_button.clicked.connect(self._load_accounts)
         self.app_id_edit.returnPressed.connect(self._load_accounts)
+        self.account_search_edit.textChanged.connect(self._refresh_account_rows)
+        self.account_sort_combo.currentIndexChanged.connect(self._refresh_account_rows)
         self.generate_uri_button.clicked.connect(self._generate_uri)
         self.copy_uri_button.clicked.connect(self._copy_generated_uri)
         self.browse_bw_ca_button.clicked.connect(self._browse_bw_ca_certificate)
@@ -512,6 +533,13 @@ class BitwardenAutofillerWindow(QMainWindow):
             self.prefer_uri_profile_check.setChecked(
                 str(prefer_profile).casefold() not in {"0", "false", "no"}
             )
+        raw_last_sync = str(self._settings.value("last_sync_at", "")).strip()
+        if raw_last_sync:
+            try:
+                self._last_sync_at = datetime.fromisoformat(raw_last_sync)
+            except ValueError:
+                self._last_sync_at = None
+        self._update_last_sync_label()
 
     def _browse_bw_ca_certificate(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -570,6 +598,10 @@ class BitwardenAutofillerWindow(QMainWindow):
         self._start_worker(service.sync, self._vault_synced)
 
     def _vault_synced(self, _result: Any) -> None:
+        self._last_sync_at = datetime.now(UTC).astimezone()
+        self._settings.setValue("last_sync_at", self._last_sync_at.isoformat())
+        self._settings.sync()
+        self._update_last_sync_label()
         self._show_page("accounts")
         if not self.app_id_edit.text().strip():
             self.status_label.setText(
@@ -677,16 +709,82 @@ class BitwardenAutofillerWindow(QMainWindow):
             row = AccountRow(summary, self.accounts_content)
             row.action_requested.connect(self._account_action_requested)
             self._account_rows[summary.id] = row
-            self.accounts_rows_layout.addWidget(row)
-        self.accounts_rows_layout.addStretch(1)
-        self.accounts_status_label.setText(
-            f"{len(self._matches)} account(s) mapped to {app_id}. "
-            "Choose an action on an account."
-            if self._matches
-            else f"No accounts are mapped to {app_id}."
-        )
+        self._refresh_account_rows()
         self.status_label.setText("Mapped accounts refreshed.")
         self._set_busy(False)
+
+    def _refresh_account_rows(self, _changed: object = None) -> None:
+        query = self.account_search_edit.text().strip().casefold()
+        sort_by_username = self.account_sort_combo.currentData() == "username"
+        if sort_by_username:
+            ordered_matches = sorted(
+                self._matches,
+                key=lambda summary: (
+                    not bool(summary.username),
+                    summary.username.casefold(),
+                    summary.name.casefold(),
+                    summary.id,
+                ),
+            )
+        else:
+            ordered_matches = sorted(
+                self._matches,
+                key=lambda summary: (
+                    summary.name.casefold(),
+                    summary.username.casefold(),
+                    summary.id,
+                ),
+            )
+
+        while self.accounts_rows_layout.count():
+            self.accounts_rows_layout.takeAt(0)
+        visible_count = 0
+        for summary in ordered_matches:
+            row = self._account_rows.get(summary.id)
+            if row is None:
+                continue
+            visible = (
+                not query
+                or query in summary.name.casefold()
+                or query in (summary.username.casefold())
+            )
+            row.setVisible(visible)
+            visible_count += int(visible)
+            self.accounts_rows_layout.addWidget(row)
+        self.accounts_rows_layout.addStretch(1)
+
+        if not self._matches:
+            self.accounts_status_label.setText(
+                f"No accounts are mapped to {self._loaded_app_id}."
+                if self._loaded_app_id
+                else "Connect to the vault and load accounts for an application."
+            )
+        elif query and not visible_count:
+            self.accounts_status_label.setText(
+                f"No accounts match the search among {len(self._matches)} mapped "
+                f"to {self._loaded_app_id}."
+            )
+        elif query:
+            self.accounts_status_label.setText(
+                f"Showing {visible_count} of {len(self._matches)} accounts mapped "
+                f"to {self._loaded_app_id}."
+            )
+        else:
+            self.accounts_status_label.setText(
+                f"{len(self._matches)} account(s) mapped to {self._loaded_app_id}. "
+                "Choose an action on an account."
+            )
+
+    def _update_last_sync_label(self) -> None:
+        if self._last_sync_at is None:
+            self.last_sync_label.setText("Last successful sync: never")
+            return
+        local_time = self._last_sync_at.astimezone()
+        time_text = local_time.strftime("%Y-%m-%d %H:%M:%S")
+        timezone_name = local_time.tzname() or "local time"
+        self.last_sync_label.setText(
+            f"Last successful sync: {time_text} {timezone_name}"
+        )
 
     def _clear_account_rows(self) -> None:
         while self.accounts_rows_layout.count():
@@ -1036,6 +1134,8 @@ class BitwardenAutofillerWindow(QMainWindow):
         self.fill_button.setEnabled(not busy and self._service is not None)
         self.diagnostics_button.setEnabled(not busy)
         self.app_id_edit.setEnabled(not busy)
+        self.account_search_edit.setEnabled(not busy)
+        self.account_sort_combo.setEnabled(not busy)
         self.active_app_command_edit.setEnabled(not busy)
         self.bw_system_ca_check.setEnabled(not busy)
         self.bw_ca_certificate_edit.setEnabled(not busy)
@@ -1148,6 +1248,10 @@ class BitwardenAutofillerWindow(QMainWindow):
         self._settings.setValue("bw_path", self.bw_path_edit.text())
         self._settings.setValue("bw_system_ca", self.bw_system_ca_check.isChecked())
         self._settings.setValue("bw_ca_certificate", self.bw_ca_certificate_edit.text())
+        self._settings.setValue(
+            "last_sync_at",
+            self._last_sync_at.isoformat() if self._last_sync_at is not None else "",
+        )
         self._settings.sync()
         self._executor.shutdown(wait=True, cancel_futures=True)
         event.accept()
